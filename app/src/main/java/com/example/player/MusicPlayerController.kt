@@ -28,9 +28,10 @@ import kotlin.math.min
 class MusicPlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val onSongPlayed: (Song) -> Unit = {}
+    private val onSongPlayed: (Song) -> Unit = {},
+    initialPlayer: Player? = null
 ) {
-    private var controller: MediaController? = null
+    private var controller: Player? = initialPlayer
     private var progressJob: Job? = null
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -39,33 +40,6 @@ class MusicPlayerController(
     private var activeQueue: MutableList<Song> = mutableListOf()
     private var pendingPlayRequest: Pair<List<Song>, Int>? = null
     private var lastRecordedSongId: Long? = null
-
-    init {
-        initializeMediaController()
-    }
-
-    private fun initializeMediaController() {
-        val sessionToken = SessionToken(
-            context,
-            ComponentName(context, PlaybackService::class.java)
-        )
-        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-        controllerFuture.addListener({
-            try {
-                controller = controllerFuture.get()
-                controller?.addListener(playerListener)
-                val pending = pendingPlayRequest
-                if (pending != null) {
-                    pendingPlayRequest = null
-                    playQueue(pending.first, pending.second)
-                } else {
-                    syncStateFromPlayer()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }, ContextCompat.getMainExecutor(context))
-    }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -110,6 +84,51 @@ class MusicPlayerController(
                 player.play()
             }
         }
+    }
+
+    init {
+        if (initialPlayer != null) {
+            initialPlayer.addListener(playerListener)
+            syncStateFromPlayer()
+        } else {
+            initializeMediaController()
+        }
+    }
+
+    internal fun setPlayerForTesting(testPlayer: Player) {
+        controller?.removeListener(playerListener)
+        controller = testPlayer
+        testPlayer.addListener(playerListener)
+        val pending = pendingPlayRequest
+        if (pending != null) {
+            pendingPlayRequest = null
+            playQueue(pending.first, pending.second)
+        } else {
+            syncStateFromPlayer()
+        }
+    }
+
+    private fun initializeMediaController() {
+        val sessionToken = SessionToken(
+            context,
+            ComponentName(context, PlaybackService::class.java)
+        )
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture.addListener({
+            try {
+                controller = controllerFuture.get()
+                controller?.addListener(playerListener)
+                val pending = pendingPlayRequest
+                if (pending != null) {
+                    pendingPlayRequest = null
+                    playQueue(pending.first, pending.second)
+                } else {
+                    syncStateFromPlayer()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     fun playQueue(songs: List<Song>, startIndex: Int = 0) {

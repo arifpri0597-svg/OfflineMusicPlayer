@@ -21,8 +21,8 @@ import com.example.R
 
 class PlaybackService : MediaSessionService() {
 
-    private var mediaSession: MediaSession? = null
-    private lateinit var player: ExoPlayer
+    internal var mediaSession: MediaSession? = null
+    internal lateinit var player: ExoPlayer
 
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "pulse_music_channel"
