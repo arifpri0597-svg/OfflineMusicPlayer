@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -123,3 +125,83 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
 }
+
+abstract class EnsureDebugKeystoreTask : DefaultTask() {
+  @get:InputFiles
+  @get:Optional
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val base64KeystoreFile: ConfigurableFileCollection
+
+  @get:OutputFile
+  abstract val debugKeystoreFile: RegularFileProperty
+
+  @TaskAction
+  fun ensureKeystore() {
+    val targetFile = debugKeystoreFile.get().asFile
+    if (targetFile.exists() && targetFile.length() > 0L) {
+      return
+    }
+    targetFile.parentFile?.mkdirs()
+
+    val base64File = base64KeystoreFile.files.firstOrNull { it.exists() && it.length() > 0L }
+    if (base64File != null) {
+      val cleanBase64 = base64File.readText().replace("\\s".toRegex(), "")
+      targetFile.writeBytes(Base64.getDecoder().decode(cleanBase64))
+      return
+    }
+
+    val userAndroidDebugKeystore =
+        File(System.getProperty("user.home"), ".android/debug.keystore")
+    if (userAndroidDebugKeystore.exists() && userAndroidDebugKeystore.length() > 0L) {
+      userAndroidDebugKeystore.copyTo(targetFile, overwrite = true)
+      return
+    }
+
+    val javaHome = System.getProperty("java.home")
+    val keytoolFile = File(javaHome, "bin/keytool")
+    val keytoolBin = if (keytoolFile.exists()) keytoolFile.absolutePath else "keytool"
+    val process =
+        ProcessBuilder(
+                keytoolBin,
+                "-genkeypair",
+                "-v",
+                "-keystore",
+                targetFile.absolutePath,
+                "-storepass",
+                "android",
+                "-alias",
+                "androiddebugkey",
+                "-keypass",
+                "android",
+                "-keyalg",
+                "RSA",
+                "-keysize",
+                "2048",
+                "-validity",
+                "10000",
+                "-dname",
+                "CN=Android Debug,O=Android,C=US")
+            .redirectErrorStream(true)
+            .start()
+    val exitCode = process.waitFor()
+    if (exitCode != 0 || !targetFile.exists()) {
+      throw GradleException(
+          "Failed to generate standard Android debug.keystore (exit code $exitCode)")
+    }
+  }
+}
+
+val ensureDebugKeystore =
+    tasks.register<EnsureDebugKeystoreTask>("ensureDebugKeystore") {
+      base64KeystoreFile.from(rootProject.file("debug.keystore.base64"))
+      debugKeystoreFile.set(rootProject.layout.projectDirectory.file("debug.keystore"))
+      outputs.upToDateWhen {
+        val file = debugKeystoreFile.get().asFile
+        file.exists() && file.length() > 0L
+      }
+    }
+
+tasks
+    .matching { it.name == "validateSigningDebug" || it.name == "packageDebug" }
+    .configureEach { dependsOn(ensureDebugKeystore) }
+
