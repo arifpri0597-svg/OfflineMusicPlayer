@@ -1,0 +1,6 @@
+{
+  "name": "Pulse Music",
+  "description": "A modern, secure, lightweight offline music player with background playback and Material 3 design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

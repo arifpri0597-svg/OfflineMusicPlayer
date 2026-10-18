@@ -1,0 +1,51 @@
+<resources>
+    <string name="app_name">Pulse Music</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_songs">Songs</string>
+    <string name="nav_albums">Albums</string>
+    <string name="nav_artists">Artists</string>
+    <string name="nav_folders">Folders</string>
+    <string name="nav_favorites">Favorites</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="permission_rationale_title">Music Library Access</string>
+    <string name="permission_rationale_desc">Pulse Music needs permission to read audio files stored locally on your device so you can listen to your favorite tracks offline. We never upload or share your music.</string>
+    <string name="permission_grant_button">Grant Access</string>
+    <string name="permission_settings_button">Open App Settings</string>
+    <string name="permission_denied_message">Storage permission is required to discover and play local music files.</string>
+
+    <string name="empty_songs_title">No Music Found</string>
+    <string name="empty_songs_desc">No compatible audio files were discovered in your device media storage. Add some MP3, M4A, FLAC, or WAV files and refresh.</string>
+    <string name="empty_favorites_title">No Favorites Yet</string>
+    <string name="empty_favorites_desc">Tap the heart icon on any song while listening to add it to your favorites list.</string>
+    <string name="empty_history_title">No Playback History</string>
+    <string name="empty_history_desc">Songs you listen to will appear here so you can easily replay recent tracks.</string>
+    <string name="empty_search_title">No Matching Tracks</string>
+    <string name="empty_search_desc">No songs, artists, or albums matched your search query.</string>
+
+    <string name="search_hint">Search songs, artists, albums…</string>
+    <string name="unknown_title">Unknown Title</string>
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="unknown_album">Unknown Album</string>
+    <string name="unknown_duration">--:--</string>
+
+    <string name="btn_play">Play</string>
+    <string name="btn_pause">Pause</string>
+    <string name="btn_next">Next Track</string>
+    <string name="btn_prev">Previous Track</string>
+    <string name="btn_rewind_10">Rewind 10 Seconds</string>
+    <string name="btn_forward_10">Fast-forward 10 Seconds</string>
+    <string name="btn_shuffle">Shuffle</string>
+    <string name="btn_repeat">Repeat</string>
+    <string name="btn_queue">Playback Queue</string>
+    <string name="btn_favorite">Favorite</string>
+
+    <string name="sort_title">Title (A-Z)</string>
+    <string name="sort_artist">Artist (A-Z)</string>
+    <string name="sort_duration">Duration</string>
+    <string name="sort_date_added">Date Added</string>
+
+    <string name="notification_channel_name">Music Playback</string>
+    <string name="notification_channel_desc">Shows playback controls and current track information</string>
+</resources>

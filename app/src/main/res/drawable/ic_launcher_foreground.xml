@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Glowing Headphone Arc -->
+    <path
+        android:pathData="M 32,56 C 32,41 41,30 54,30 C 67,30 76,41 76,56"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="32"
+                android:startY="30"
+                android:endX="76"
+                android:endY="56"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#A855F7" />
+                <item android:offset="0.5" android:color="#6366F1" />
+                <item android:offset="1.0" android:color="#38BDF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Left Ear Cup -->
+    <path
+        android:pathData="M 28,54 C 28,51 31,48 34,48 L 36,48 C 38,48 39,50 39,52 L 39,66 C 39,68 38,70 36,70 L 34,70 C 31,70 28,67 28,64 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="28"
+                android:startY="48"
+                android:endX="39"
+                android:endY="70"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#C084FC" />
+                <item android:offset="1.0" android:color="#818CF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Right Ear Cup -->
+    <path
+        android:pathData="M 69,52 C 69,50 70,48 72,48 L 74,48 C 77,48 80,51 80,54 L 80,64 C 80,67 77,70 74,70 L 72,70 C 70,70 69,68 69,66 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="69"
+                android:startY="48"
+                android:endX="80"
+                android:endY="70"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#818CF8" />
+                <item android:offset="1.0" android:color="#38BDF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Center Dynamic Audio Waves / Pulse Bars -->
+    <!-- Bar 1 (Outer Left) -->
+    <path
+        android:pathData="M 43,55 L 43,63"
+        android:strokeWidth="2.8"
+        android:strokeColor="#818CF8"
+        android:strokeLineCap="round" />
+
+    <!-- Bar 2 (Mid Left) -->
+    <path
+        android:pathData="M 47,49 L 47,69"
+        android:strokeWidth="3.2"
+        android:strokeColor="#A855F7"
+        android:strokeLineCap="round" />
+
+    <!-- Bar 3 (Center Peak) -->
+    <path
+        android:pathData="M 52,43 L 52,73"
+        android:strokeWidth="3.5"
+        android:strokeColor="#F472B6"
+        android:strokeLineCap="round" />
+
+    <!-- Bar 4 (Mid Right) -->
+    <path
+        android:pathData="M 57,47 L 57,71"
+        android:strokeWidth="3.2"
+        android:strokeColor="#60A5FA"
+        android:strokeLineCap="round" />
+
+    <!-- Bar 5 (Center-Right Play Arrow accent) -->
+    <path
+        android:pathData="M 62,53 L 62,65"
+        android:strokeWidth="2.8"
+        android:strokeColor="#38BDF8"
+        android:strokeLineCap="round" />
+
+</vector>
