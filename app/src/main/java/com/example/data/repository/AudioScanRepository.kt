@@ -31,6 +31,8 @@ class AudioScanRepository(
 ) {
     private val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
 
+    private val scanMutex = kotlinx.coroutines.sync.Mutex()
+
     /**
      * Scans the device's external storage for audio files using Android MediaStore API,
      * maps each cursor entry to our local database schema (SongEntity), and persists/syncs
@@ -39,6 +41,7 @@ class AudioScanRepository(
      * @return List of newly mapped SongEntity items stored in the local database.
      */
     suspend fun scanAndSyncDeviceAudio(): List<SongEntity> = withContext(Dispatchers.IO) {
+        scanMutex.lock()
         var scannedEntities = ArrayList<SongEntity>(256)
         val contentResolver: ContentResolver = context.contentResolver
 
@@ -78,12 +81,13 @@ class AudioScanRepository(
                 if (count > 256) {
                     scannedEntities = ArrayList(count)
                 }
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
+                if (idCol == -1) return@use
+                val titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
+                val artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)
+                val albumCol = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM)
+                val albumIdCol = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
+                val durationCol = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION)
                 val trackCol = cursor.getColumnIndex(MediaStore.Audio.Media.TRACK)
                 val yearCol = cursor.getColumnIndex(MediaStore.Audio.Media.YEAR)
                 val sizeCol = cursor.getColumnIndex(MediaStore.Audio.Media.SIZE)
@@ -112,8 +116,12 @@ class AudioScanRepository(
 
             // Atomically sync with local Room database in a single transaction on Dispatchers.IO
             musicDao.syncScannedSongs(scannedEntities)
+        } catch (_: SecurityException) {
+            // Permission revoked or unavailable at OS level; do not wipe existing Room cache
         } catch (e: Exception) {
             e.printStackTrace()
+        } finally {
+            scanMutex.unlock()
         }
 
         scannedEntities

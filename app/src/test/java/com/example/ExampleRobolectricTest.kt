@@ -170,4 +170,27 @@ class ExampleRobolectricTest {
 
         db.close()
     }
+
+    @Test
+    fun firstLaunchAndClearData_permissionGrantAndRepeatedCallbacks_isIdempotentAndCrashFree() {
+        val context = ApplicationProvider.getApplicationContext<PulseMusicApp>()
+        val db = context.database
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            db.clearAllTables()
+        }
+
+        val viewModel = com.example.viewmodel.MusicViewModel(context)
+
+        // 1. Permission denied state on first launch
+        viewModel.onPermissionResult(false)
+        assertFalse(viewModel.libraryState.value.hasPermission)
+
+        // 2. Simultaneous / repeated permission granted callbacks after fresh install or Clear Data
+        viewModel.onPermissionResult(true)
+        viewModel.onPermissionResult(true)
+        viewModel.refreshLibrary()
+        viewModel.refreshLibrary()
+
+        assertTrue(viewModel.libraryState.value.hasPermission)
+    }
 }

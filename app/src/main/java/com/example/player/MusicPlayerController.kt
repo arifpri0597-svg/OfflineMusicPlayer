@@ -227,18 +227,39 @@ class MusicPlayerController(
         }
     }
 
+    @Volatile
+    private var isControllerConnectionRequested: Boolean = false
+
     init {
         if (initialPlayer != null) {
             initialPlayer.addListener(playerListener)
             syncStateFromPlayer()
-        } else {
+        }
+    }
+
+    /**
+     * Ensures the Media3 MediaController connection to PlaybackService is initialized.
+     * Safe and idempotent to call multiple times; avoids starting PlaybackService before
+     * first-launch permissions are resolved.
+     */
+    fun ensureControllerInitialized() {
+        if (controller != null || isControllerConnectionRequested) return
+        synchronized(this) {
+            if (controller != null || isControllerConnectionRequested) return
+            isControllerConnectionRequested = true
+        }
+        try {
             initializeMediaController()
+        } catch (e: Exception) {
+            isControllerConnectionRequested = false
+            e.printStackTrace()
         }
     }
 
     internal fun setPlayerForTesting(testPlayer: Player) {
         controller?.removeListener(playerListener)
         controller = testPlayer
+        isControllerConnectionRequested = true
         testPlayer.addListener(playerListener)
         val pending = pendingPlayRequest
         if (pending != null) {
@@ -330,6 +351,7 @@ class MusicPlayerController(
                     }
                 }
             } catch (e: Exception) {
+                isControllerConnectionRequested = false
                 e.printStackTrace()
             }
         }, ContextCompat.getMainExecutor(context))
@@ -427,6 +449,8 @@ class MusicPlayerController(
         val player = controller
         if (player != null && !player.isPlaying) {
             applyRestoredStateToPlayer(player)
+        } else if (player == null) {
+            ensureControllerInitialized()
         }
         return true
     }
@@ -564,6 +588,7 @@ class MusicPlayerController(
                 isPlayingOverride = autoPlay,
                 immediate = true
             )
+            ensureControllerInitialized()
             return
         }
 
@@ -634,6 +659,7 @@ class MusicPlayerController(
                 isPlayingOverride = willPlay,
                 immediate = true
             )
+            ensureControllerInitialized()
             return
         }
 
@@ -1167,6 +1193,7 @@ class MusicPlayerController(
             controllerFuture = null
         } ?: controller?.release()
         controller = null
+        isControllerConnectionRequested = false
     }
 }
 

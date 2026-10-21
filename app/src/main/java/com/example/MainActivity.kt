@@ -215,16 +215,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkAudioPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_MEDIA_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.READ_MEDIA_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -245,7 +249,11 @@ class MainActivity : ComponentActivity() {
         }
 
         if (permissionsToRequest.isNotEmpty()) {
-            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
+            try {
+                requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
+            } catch (_: Exception) {
+                viewModel.onPermissionResult(checkAudioPermission())
+            }
         } else {
             viewModel.onPermissionResult(true)
         }
@@ -253,13 +261,15 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissionsMap ->
-        val audioGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsMap[Manifest.permission.READ_MEDIA_AUDIO] == true
+    ) { permissionsMap: Map<String, @JvmSuppressWildcards Boolean>? ->
+        val safeMap = permissionsMap ?: emptyMap()
+        val audioGrantedFromCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            safeMap[Manifest.permission.READ_MEDIA_AUDIO] == true
         } else {
-            permissionsMap[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+            safeMap[Manifest.permission.READ_EXTERNAL_STORAGE] == true
         }
-        viewModel.onPermissionResult(audioGranted)
+        val effectiveAudioGranted = audioGrantedFromCallback || checkAudioPermission()
+        viewModel.onPermissionResult(effectiveAudioGranted)
     }
 }
 

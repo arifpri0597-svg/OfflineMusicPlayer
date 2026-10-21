@@ -72,10 +72,10 @@ data class LibraryUiState(
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as PulseMusicApp
-    private val audioScanRepository = app.audioScanRepository
-    private val playbackStateRepository = app.playbackStateRepository
-    private val musicDao = app.database.musicDao()
-    private val userPrefs = app.userPreferences
+    private val audioScanRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { app.audioScanRepository }
+    private val playbackStateRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { app.playbackStateRepository }
+    private val musicDao by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { app.database.musicDao() }
+    private val userPrefs by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { app.userPreferences }
 
     val playerController: MusicPlayerController = MusicPlayerController(
         context = application,
@@ -90,23 +90,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var playlistSongsJob: Job? = null
     private var scanJob: Job? = null
-    private var hasPerformedInitialScan = false
+    private val hasStartedDatabaseObservers = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val hasPerformedInitialScan = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isScanInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private var lastGroupedSongIds: List<Long> = emptyList()
 
     init {
-        restoreLastPlaybackState()
+        observePreferences()
+        ensureDatabaseObserversStarted()
+    }
+
+    /**
+     * Starts Room database flow observers idempotently on background dispatchers.
+     * Calling this multiple times is a safe no-op.
+     */
+    fun ensureDatabaseObserversStarted() {
+        if (!hasStartedDatabaseObservers.compareAndSet(false, true)) return
         observeSongsFromDatabase()
         observeFavorites()
         observePlaylists()
-        observePreferences()
-    }
-
-    private fun restoreLastPlaybackState(librarySongs: List<Song> = emptyList()) {
-        viewModelScope.launch {
-            if (_libraryState.value.resumeLastPlayback) {
-                playerController.restorePlaybackState(librarySongs)
-            }
-        }
     }
 
     private fun observeSongsFromDatabase() {
@@ -146,11 +148,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun observeFavorites() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             musicDao.getAllFavoriteIds()
                 .distinctUntilChanged()
                 .map { it.toHashSet() }
-                .flowOn(Dispatchers.Default)
                 .collect { favSet ->
                     _libraryState.update { it.copy(favoriteIds = favSet) }
                 }
@@ -158,11 +159,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun observePlaylists() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             musicDao.getPlaylistsWithTrackCount()
                 .distinctUntilChanged()
                 .map { list -> list.map { it.toPlaylist() } }
-                .flowOn(Dispatchers.Default)
                 .collect { playlists ->
                     _libraryState.update { it.copy(playlists = playlists) }
                 }
@@ -170,21 +170,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun observePreferences() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             userPrefs.themeMode
                 .distinctUntilChanged()
                 .collect { mode ->
                     _libraryState.update { it.copy(userThemePreference = mode) }
                 }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             userPrefs.resumeLast
                 .distinctUntilChanged()
                 .collect { resume ->
                     _libraryState.update { it.copy(resumeLastPlayback = resume) }
                 }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             userPrefs.pauseOnHeadsetUnplug
                 .distinctUntilChanged()
                 .collect { pauseOnUnplug ->
@@ -198,21 +198,32 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (wasGranted != isGranted) {
             _libraryState.update { it.copy(hasPermission = isGranted) }
         }
-        if (isGranted && (!hasPerformedInitialScan || !wasGranted)) {
-            hasPerformedInitialScan = true
+        if (!isGranted) {
+            return
+        }
+        ensureDatabaseObserversStarted()
+        playerController.ensureControllerInitialized()
+        if (!wasGranted || hasPerformedInitialScan.compareAndSet(false, true)) {
+            hasPerformedInitialScan.set(true)
             refreshLibrary()
         }
     }
 
     fun refreshLibrary() {
-        if (scanJob?.isActive == true) return
+        if (!_libraryState.value.hasPermission) return
+        if (!isScanInFlight.compareAndSet(false, true)) return
         scanJob = viewModelScope.launch(Dispatchers.IO) {
             _libraryState.update { it.copy(isLoading = true) }
             try {
                 audioScanRepository.scanAndSyncDeviceAudio()
+                val currentSongs = _libraryState.value.songs
+                if (_libraryState.value.resumeLastPlayback) {
+                    playerController.restorePlaybackState(currentSongs)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
+                isScanInFlight.set(false)
                 _libraryState.update { it.copy(isLoading = false) }
             }
         }

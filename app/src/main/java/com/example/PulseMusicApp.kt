@@ -13,28 +13,29 @@ import com.example.data.repository.PlaybackStateRepository
 
 class PulseMusicApp : Application(), ImageLoaderFactory {
 
-    lateinit var database: PulseDatabase
-        private set
+    val database: PulseDatabase by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        PulseDatabase.getInstance(this)
+    }
 
-    lateinit var mediaRepository: MediaRepository
-        private set
+    val mediaRepository: MediaRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        MediaRepository(this)
+    }
 
-    lateinit var audioScanRepository: AudioScanRepository
-        private set
+    val audioScanRepository: AudioScanRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AudioScanRepository(this, database.musicDao())
+    }
 
-    lateinit var playbackStateRepository: PlaybackStateRepository
-        private set
+    val playbackStateRepository: PlaybackStateRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        PlaybackStateRepository(this, database.musicDao())
+    }
 
-    lateinit var userPreferences: UserPreferences
-        private set
+    val userPreferences: UserPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        UserPreferences(this)
+    }
 
     override fun onCreate() {
         super.onCreate()
-        database = PulseDatabase.getInstance(this)
-        mediaRepository = MediaRepository(this)
-        audioScanRepository = AudioScanRepository(this, database.musicDao())
-        playbackStateRepository = PlaybackStateRepository(this, database.musicDao())
-        userPreferences = UserPreferences(this)
+        instance = this
     }
 
     override fun newImageLoader(): ImageLoader {
@@ -53,6 +54,13 @@ class PulseMusicApp : Application(), ImageLoaderFactory {
             .allowHardware(true)
             .allowRgb565(true)
             .crossfade(false)
+            .respectCacheHeaders(false)
             .build()
+    }
+
+    companion object {
+        @Volatile
+        var instance: PulseMusicApp? = null
+            private set
     }
 }
