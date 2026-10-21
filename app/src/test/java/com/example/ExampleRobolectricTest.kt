@@ -78,6 +78,7 @@ class ExampleRobolectricTest {
         val packageManager = context.packageManager
 
         val supportedMimeTypes = listOf(
+            "audio/*",          // Wildcard audio
             "audio/mpeg",       // MP3
             "audio/mp3",        // MP3
             "audio/wav",        // WAV
@@ -90,7 +91,8 @@ class ExampleRobolectricTest {
             "audio/x-flac",     // FLAC
             "application/flac", // FLAC
             "audio/ogg",        // OGG
-            "application/ogg"   // OGG
+            "application/ogg",  // OGG
+            "audio/webm"        // WEBM
         )
 
         val testUris = listOf(

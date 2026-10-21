@@ -229,11 +229,8 @@ class MainActivity : ComponentActivity() {
 private val BOTTOM_NAV_ITEMS = listOf(
     NavItem(NavigationTab.HOME, "Home", Icons.Default.Home),
     NavItem(NavigationTab.SONGS, "Songs", Icons.Default.MusicNote),
-    NavItem(NavigationTab.PLAYLISTS, "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
     NavItem(NavigationTab.ALBUMS, "Albums", Icons.Default.Album),
-    NavItem(NavigationTab.ARTISTS, "Artists", Icons.Default.Person),
     NavItem(NavigationTab.FOLDERS, "Folders", Icons.Default.Folder),
-    NavItem(NavigationTab.FAVORITES, "Favorites", Icons.Default.Favorite),
     NavItem(NavigationTab.SETTINGS, "Settings", Icons.Default.Settings)
 )
 
@@ -301,17 +298,23 @@ fun PulseMusicAppRoot(
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.navigationBars)
                 ) {
-                    // Isolated MiniPlayer section so 200ms progress ticks only recompose MiniPlayer
+                    // Isolated MiniPlayer section so progress ticks only recompose MiniPlayer
                     MiniPlayerSection(
                         viewModel = viewModel,
                         favoriteIds = libraryState.favoriteIds
                     )
 
-                    // Modern PureTune Bottom Navigation Bar
+                    // Slight top separation above simplified 5-tab Bottom Navigation Bar
+                    androidx.compose.material3.HorizontalDivider(
+                        thickness = 1.dp,
+                        color = com.example.ui.theme.NeonPurple.copy(alpha = 0.2f)
+                    )
+
+                    // Simplified 5-Tab Bottom Navigation Bar: [ Home ] [ Songs ] [ Albums ] [ Folders ] [ Settings ]
                     NavigationBar(
                         modifier = Modifier.testTag("bottom_nav_bar"),
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 8.dp
+                        containerColor = androidx.compose.ui.graphics.Color(0xFF0E071B).copy(alpha = 0.96f),
+                        tonalElevation = 0.dp
                     ) {
                         BOTTOM_NAV_ITEMS.forEach { item ->
                             val isSelected = libraryState.selectedTab == item.tab
@@ -333,11 +336,11 @@ fun PulseMusicAppRoot(
                                     )
                                 },
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    selectedIconColor = com.example.ui.theme.NeonPink,
+                                    selectedTextColor = com.example.ui.theme.NeonPink,
+                                    indicatorColor = com.example.ui.theme.NeonPink.copy(alpha = 0.18f),
+                                    unselectedIconColor = androidx.compose.ui.graphics.Color(0xFFB3A4CC),
+                                    unselectedTextColor = androidx.compose.ui.graphics.Color(0xFFB3A4CC)
                                 ),
                                 modifier = Modifier.testTag("nav_item_${item.label.lowercase()}")
                             )
@@ -381,8 +384,13 @@ fun PulseMusicAppRoot(
                                 onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) },
                                 onNavigateToSongs = { viewModel.setNavigationTab(NavigationTab.SONGS) },
                                 onNavigateToAlbums = { viewModel.setNavigationTab(NavigationTab.ALBUMS) },
+                                onNavigateToPlaylists = { viewModel.setNavigationTab(NavigationTab.PLAYLISTS) },
+                                onNavigateToFavorites = { viewModel.setNavigationTab(NavigationTab.FAVORITES) },
+                                onNavigateToArtists = { viewModel.setNavigationTab(NavigationTab.ARTISTS) },
                                 onNavigateToHistory = { viewModel.setNavigationTab(NavigationTab.HISTORY) },
-                                onNavigateToSettings = { viewModel.setNavigationTab(NavigationTab.SETTINGS) }
+                                onNavigateToSettings = { viewModel.setNavigationTab(NavigationTab.SETTINGS) },
+                                playlistCount = libraryState.playlists.size,
+                                artistCount = libraryState.artists.size
                             )
                         }
 

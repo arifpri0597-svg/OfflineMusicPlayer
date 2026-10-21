@@ -20,7 +20,7 @@
 
     <application
         android:name=".PulseMusicApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:hardwareAccelerated="true"
@@ -44,7 +44,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Allow opening audio files (MP3, WAV, M4A, AAC, FLAC, OGG) from any File Manager ("Open with") -->
+            <!-- Allow opening audio files (MP3, WAV, M4A, AAC, FLAC, OGG, WEBM) from any File Manager ("Open with") -->
             <intent-filter tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -71,6 +71,7 @@
                 <data android:mimeType="audio/ogg" />
                 <data android:mimeType="application/ogg" />
                 <data android:mimeType="application/x-ogg" />
+                <data android:mimeType="audio/webm" />
             </intent-filter>
         </activity>
 

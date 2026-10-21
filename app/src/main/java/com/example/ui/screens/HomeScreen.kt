@@ -8,7 +8,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,12 +27,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -60,6 +61,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -82,6 +84,58 @@ import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPinkLight
 import com.example.ui.theme.NeonPurple
 
+private val HomeBackgroundBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF17092E),
+        DarkBackground,
+        Color(0xFF06030C)
+    )
+)
+
+private val ActionGradientBrush = Brush.horizontalGradient(
+    colors = listOf(NeonPink, NeonPurple)
+)
+
+private val ActionBorderBrush = Brush.horizontalGradient(
+    colors = listOf(NeonPurple, NeonPink)
+)
+
+private val HeroBorderBrush = Brush.linearGradient(
+    colors = listOf(NeonPink.copy(alpha = 0.65f), NeonPurple.copy(alpha = 0.45f))
+)
+
+private val HeroBackgroundBrush = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF2B0B3F),
+        DeepViolet,
+        Color(0xFF5B1049)
+    )
+)
+
+private val HeroBarBrush = Brush.verticalGradient(
+    colors = listOf(NeonPinkLight, NeonPink, NeonPurple)
+)
+
+private val RecentThumbBrush = Brush.linearGradient(
+    colors = listOf(
+        ElectricViolet.copy(alpha = 0.5f),
+        NeonPink.copy(alpha = 0.35f)
+    )
+)
+
+private val HomeAlbumBackdropBrush = Brush.linearGradient(
+    colors = listOf(
+        DeepViolet,
+        NeonPink.copy(alpha = 0.4f)
+    )
+)
+
+private val ActionButtonShape = RoundedCornerShape(18.dp)
+private val RecentCardShape = RoundedCornerShape(18.dp)
+private val RecentArtShape = RoundedCornerShape(14.dp)
+private val HomeAlbumCardShape = RoundedCornerShape(20.dp)
+private val QuickAccessPillShape = RoundedCornerShape(16.dp)
+
 @Composable
 fun HomeScreen(
     songs: List<Song>,
@@ -100,8 +154,13 @@ fun HomeScreen(
     onAddToPlaylist: (Song) -> Unit = {},
     onNavigateToSongs: () -> Unit,
     onNavigateToAlbums: () -> Unit = {},
+    onNavigateToPlaylists: () -> Unit = {},
+    onNavigateToFavorites: () -> Unit = {},
+    onNavigateToArtists: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
+    playlistCount: Int = 0,
+    artistCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     var showSearchBar by rememberSaveable { mutableStateOf(false) }
@@ -155,19 +214,11 @@ fun HomeScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF17092E),
-                        DarkBackground,
-                        Color(0xFF06030C)
-                    )
-                )
-            )
+            .background(HomeBackgroundBrush)
             .testTag("home_screen"),
         contentPadding = PaddingValues(bottom = 104.dp)
     ) {
-        // 1. PureTune / Offline Music Player Header with Search & Settings Icons
+        // 1. App Title Header + Hero Banner + Shuffle All / Play All + Quick Access Cards
         item(key = "home_header", contentType = "header") {
             Column(modifier = Modifier.fillMaxWidth()) {
                 PureTuneTopHeader(
@@ -190,7 +241,7 @@ fun HomeScreen(
                     )
                 }
 
-                // 2. Hero Banner Card
+                // 2. Hero Banner showing total local tracks & albums
                 PureTuneHeroBanner(
                     songCount = songs.size,
                     albumCount = albums.size,
@@ -210,13 +261,9 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(NeonPink, NeonPurple)
-                                )
-                            )
+                            .height(50.dp)
+                            .clip(ActionButtonShape)
+                            .background(ActionGradientBrush)
                             .clickable(onClick = onShuffleAll)
                             .testTag("home_shuffle_all_btn"),
                         contentAlignment = Alignment.Center
@@ -242,16 +289,13 @@ fun HomeScreen(
                     Surface(
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(18.dp))
+                            .height(50.dp)
+                            .clip(ActionButtonShape)
                             .clickable(onClick = onPlayAll)
                             .testTag("home_play_all_btn"),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = ActionButtonShape,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                        border = BorderStroke(
-                            1.2.dp,
-                            Brush.horizontalGradient(listOf(NeonPurple, NeonPink))
-                        )
+                        border = BorderStroke(1.2.dp, ActionBorderBrush)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -273,10 +317,48 @@ fun HomeScreen(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Quick Access Horizontal Cards for Playlists, Favorites, and Artists
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    HomeQuickAccessCard(
+                        icon = Icons.Default.Favorite,
+                        title = "Favorites",
+                        subtitle = "${favoriteSongs.size} tracks",
+                        accentColor = NeonPink,
+                        onClick = onNavigateToFavorites,
+                        testTag = "home_quick_favorites_btn",
+                        modifier = Modifier.weight(1f)
+                    )
+                    HomeQuickAccessCard(
+                        icon = Icons.AutoMirrored.Filled.QueueMusic,
+                        title = "Playlists",
+                        subtitle = "$playlistCount lists",
+                        accentColor = NeonPurple,
+                        onClick = onNavigateToPlaylists,
+                        testTag = "home_quick_playlists_btn",
+                        modifier = Modifier.weight(1f)
+                    )
+                    HomeQuickAccessCard(
+                        icon = Icons.Default.Person,
+                        title = "Artists",
+                        subtitle = "$artistCount artists",
+                        accentColor = NeonPinkLight,
+                        onClick = onNavigateToArtists,
+                        testTag = "home_quick_artists_btn",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
-        // 4. Recently Played Section
+        // 4. Recently Played Section (Horizontal Cards)
         if (displayedRecentSongs.isNotEmpty() && searchQuery.isBlank()) {
             item(key = "home_recent_section", contentType = "carousel") {
                 Column(
@@ -328,7 +410,7 @@ fun HomeScreen(
                             key = { it.id },
                             contentType = { "recent_card" }
                         ) { song ->
-                            RecentSongCard(
+                            RecentSongHorizontalCard(
                                 song = song,
                                 isPlaying = isPlaying && currentSongId == song.id,
                                 onClick = { onSongClick(song, displayedRecentSongs) }
@@ -345,7 +427,7 @@ fun HomeScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 22.dp)
+                        .padding(top = 20.dp)
                 ) {
                     Row(
                         modifier = Modifier
@@ -406,20 +488,33 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 6.dp),
+                        .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Favorite,
-                        contentDescription = null,
-                        tint = NeonPink,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = NeonPink,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Favorite Tracks (${favoriteSongs.size})",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(
-                        text = "Favorite Tracks (${favoriteSongs.size})",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        text = "See All",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = NeonPink,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(onClick = onNavigateToFavorites)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
             }
@@ -447,7 +542,7 @@ fun HomeScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 6.dp),
+                    .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -460,7 +555,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (searchQuery.isBlank()) "All Tracks" else "Search Results (${filteredAllTracks.size})",
+                        text = if (searchQuery.isBlank()) "All Tracks (${songs.size})" else "Search Results (${filteredAllTracks.size})",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
@@ -499,6 +594,65 @@ fun HomeScreen(
 }
 
 @Composable
+private fun HomeQuickAccessCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    accentColor: Color,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .clip(QuickAccessPillShape)
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        shape = QuickAccessPillShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(accentColor.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PureTuneTopHeader(
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit
@@ -515,11 +669,7 @@ private fun PureTuneTopHeader(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(NeonPink, NeonPurple)
-                        )
-                    ),
+                    .background(ActionGradientBrush),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -599,40 +749,25 @@ private fun PureTuneHeroBanner(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(152.dp)
+            .height(144.dp)
             .testTag("home_hero_banner"),
         shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(
-            1.dp,
-            Brush.linearGradient(
-                colors = listOf(NeonPink.copy(alpha = 0.65f), NeonPurple.copy(alpha = 0.45f))
-            )
-        ),
+        border = BorderStroke(1.dp, HeroBorderBrush),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF2B0B3F),
-                            DeepViolet,
-                            Color(0xFF5B1049)
-                        )
-                    )
-                )
+                .background(HeroBackgroundBrush)
         ) {
-            // Decorative Neon Soundwaves & Glowing Orbs in Hero Canvas
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val width = size.width
                 val height = size.height
 
-                // Ambient neon glow circle on the right
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            NeonPink.copy(alpha = 0.38f),
+                            NeonPink.copy(alpha = 0.36f),
                             NeonPurple.copy(alpha = 0.12f),
                             Color.Transparent
                         ),
@@ -643,33 +778,29 @@ private fun PureTuneHeroBanner(
                     radius = height * 0.9f
                 )
 
-                // Concentric vinyl/sound rings
                 drawCircle(
                     color = NeonPinkLight.copy(alpha = 0.18f),
-                    radius = height * 0.52f,
+                    radius = height * 0.5f,
                     center = Offset(width * 0.84f, height * 0.5f),
                     style = Stroke(width = 2.dp.toPx())
                 )
                 drawCircle(
-                    color = NeonPurple.copy(alpha = 0.25f),
-                    radius = height * 0.36f,
+                    color = NeonPurple.copy(alpha = 0.24f),
+                    radius = height * 0.34f,
                     center = Offset(width * 0.84f, height * 0.5f),
                     style = Stroke(width = 3.dp.toPx())
                 )
 
-                // Stylised equalizer bars on right side of banner
                 val barHeights = floatArrayOf(0.28f, 0.52f, 0.78f, 0.45f, 0.88f, 0.62f, 0.35f)
                 val barWidth = 5.dp.toPx()
                 val gap = 5.dp.toPx()
                 val startX = width * 0.74f
                 for (i in barHeights.indices) {
-                    val barH = height * 0.55f * barHeights[i]
+                    val barH = height * 0.52f * barHeights[i]
                     val x = startX + i * (barWidth + gap)
                     val y = (height - barH) / 2f
                     drawRoundRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(NeonPinkLight, NeonPink, NeonPurple)
-                        ),
+                        brush = HeroBarBrush,
                         topLeft = Offset(x, y),
                         size = Size(barWidth, barH),
                         cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
@@ -680,7 +811,7 @@ private fun PureTuneHeroBanner(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Surface(
@@ -708,7 +839,7 @@ private fun PureTuneHeroBanner(
                     Text(
                         text = "$songCount local tracks • $albumCount albums ready offline",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.82f)
+                        color = Color.White.copy(alpha = 0.85f)
                     )
                 }
             }
@@ -716,8 +847,12 @@ private fun PureTuneHeroBanner(
     }
 }
 
+/**
+ * Horizontal card for Recently Played tracks with lazy-loaded artwork,
+ * track metadata, and active playback indicator.
+ */
 @Composable
-private fun RecentSongCard(
+private fun RecentSongHorizontalCard(
     song: Song,
     isPlaying: Boolean,
     onClick: () -> Unit
@@ -725,10 +860,10 @@ private fun RecentSongCard(
     val context = LocalContext.current
     Card(
         modifier = Modifier
-            .width(136.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .width(228.dp)
+            .clip(RecentCardShape)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
+        shape = RecentCardShape,
         border = BorderStroke(
             width = 1.dp,
             color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
@@ -741,19 +876,17 @@ private fun RecentSongCard(
             }
         )
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
-                    .size(116.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                ElectricViolet.copy(alpha = 0.5f),
-                                NeonPink.copy(alpha = 0.35f)
-                            )
-                        )
-                    ),
+                    .size(56.dp)
+                    .clip(RecentArtShape)
+                    .background(RecentThumbBrush),
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
@@ -764,7 +897,7 @@ private fun RecentSongCard(
                             .memoryCacheKey(key)
                             .diskCacheKey(key)
                             .crossfade(false)
-                            .size(256, 256)
+                            .size(160, 160)
                             .build()
                     }
                     AsyncImage(
@@ -778,48 +911,53 @@ private fun RecentSongCard(
                         imageVector = Icons.Default.MusicNote,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(38.dp)
-                    )
-                }
-
-                // Play / Equalizer badge in bottom-right corner
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(NeonPink, NeonPurple)
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Default.Equalizer else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = song.formattedDuration,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NeonPinkLight.copy(alpha = 0.85f)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(ActionGradientBrush),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Equalizer else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }
@@ -832,10 +970,10 @@ private fun HomeAlbumCard(
     val context = LocalContext.current
     Card(
         modifier = Modifier
-            .width(146.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .width(142.dp)
+            .clip(HomeAlbumCardShape)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
+        shape = HomeAlbumCardShape,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -844,15 +982,8 @@ private fun HomeAlbumCard(
         Column {
             Box(
                 modifier = Modifier
-                    .size(146.dp)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                DeepViolet,
-                                NeonPink.copy(alpha = 0.4f)
-                            )
-                        )
-                    ),
+                    .size(142.dp)
+                    .background(HomeAlbumBackdropBrush),
                 contentAlignment = Alignment.Center
             ) {
                 if (album.artworkUri != null) {
@@ -863,7 +994,7 @@ private fun HomeAlbumCard(
                             .memoryCacheKey(key)
                             .diskCacheKey(key)
                             .crossfade(false)
-                            .size(300, 300)
+                            .size(256, 256)
                             .build()
                     }
                     AsyncImage(
@@ -898,4 +1029,5 @@ private fun HomeAlbumCard(
         }
     }
 }
+
 

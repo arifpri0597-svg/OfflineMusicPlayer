@@ -73,6 +73,33 @@ import com.example.ui.theme.ElectricViolet
 import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPurple
 
+private val SongRowShape = RoundedCornerShape(18.dp)
+private val SongThumbShape = RoundedCornerShape(14.dp)
+private val AlbumCardShape = RoundedCornerShape(20.dp)
+private val PlayingOverlayColor = Color.Black.copy(alpha = 0.45f)
+
+private val SongThumbBrush = Brush.linearGradient(
+    colors = listOf(
+        ElectricViolet.copy(alpha = 0.45f),
+        NeonPink.copy(alpha = 0.35f)
+    )
+)
+
+private val AlbumPlaceholderBrush = Brush.linearGradient(
+    colors = listOf(
+        ElectricViolet.copy(alpha = 0.35f),
+        NeonPink.copy(alpha = 0.25f)
+    )
+)
+
+private val ArtistAvatarBrush = Brush.linearGradient(
+    colors = listOf(ElectricViolet, NeonPink)
+)
+
+private val FolderIconBrush = Brush.linearGradient(
+    colors = listOf(NeonPurple, NeonPink)
+)
+
 @Composable
 fun SongItemRow(
     song: Song,
@@ -88,14 +115,11 @@ fun SongItemRow(
     var menuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    val cardBgColor by animateColorAsState(
-        targetValue = if (isPlaying) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        },
-        label = "song_row_bg"
-    )
+    val cardBgColor = if (isPlaying) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    }
 
     val borderColor = if (isPlaying) {
         NeonPink.copy(alpha = 0.7f)
@@ -107,10 +131,10 @@ fun SongItemRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(SongRowShape)
             .clickable(onClick = onSongClick)
             .testTag("song_item_${song.id}"),
-        shape = RoundedCornerShape(18.dp),
+        shape = SongRowShape,
         color = cardBgColor,
         border = BorderStroke(1.dp, borderColor)
     ) {
@@ -124,15 +148,8 @@ fun SongItemRow(
             Box(
                 modifier = Modifier
                     .size(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                ElectricViolet.copy(alpha = 0.45f),
-                                NeonPink.copy(alpha = 0.35f)
-                            )
-                        )
-                    ),
+                    .clip(SongThumbShape)
+                    .background(SongThumbBrush),
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
@@ -165,7 +182,7 @@ fun SongItemRow(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f)),
+                            .background(PlayingOverlayColor),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -285,10 +302,10 @@ fun AlbumCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(AlbumCardShape)
             .clickable(onClick = onClick)
             .testTag("album_card_${album.id}"),
-        shape = RoundedCornerShape(20.dp),
+        shape = AlbumCardShape,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
@@ -299,14 +316,7 @@ fun AlbumCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                ElectricViolet.copy(alpha = 0.4f),
-                                NeonPink.copy(alpha = 0.25f)
-                            )
-                        )
-                    ),
+                    .background(AlbumPlaceholderBrush),
                 contentAlignment = Alignment.Center
             ) {
                 if (album.artworkUri != null) {
@@ -317,7 +327,7 @@ fun AlbumCard(
                             .memoryCacheKey(key)
                             .diskCacheKey(key)
                             .crossfade(false)
-                            .size(300, 300)
+                            .size(256, 256)
                             .build()
                     }
                     AsyncImage(
@@ -366,10 +376,10 @@ fun ArtistItemRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(SongRowShape)
             .clickable(onClick = onClick)
             .testTag("artist_item_${artist.name}"),
-        shape = RoundedCornerShape(18.dp),
+        shape = SongRowShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
     ) {
@@ -383,11 +393,7 @@ fun ArtistItemRow(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(NeonPink, NeonPurple)
-                        )
-                    ),
+                    .background(ArtistAvatarBrush),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -425,10 +431,10 @@ fun FolderItemRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(SongRowShape)
             .clickable(onClick = onClick)
             .testTag("folder_item_${folder.name}"),
-        shape = RoundedCornerShape(18.dp),
+        shape = SongRowShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
     ) {
@@ -441,12 +447,8 @@ fun FolderItemRow(
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(ElectricViolet, NeonPink.copy(alpha = 0.8f))
-                        )
-                    ),
+                    .clip(SongThumbShape)
+                    .background(FolderIconBrush),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

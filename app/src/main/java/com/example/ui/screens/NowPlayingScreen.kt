@@ -2,13 +2,8 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode as ComposeRepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -16,6 +11,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +67,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -100,12 +98,44 @@ import com.example.data.model.RepeatMode
 import com.example.data.model.Song
 import com.example.player.PlayerUiState
 import com.example.ui.theme.DarkBackground
-import com.example.ui.theme.DeepViolet
-import com.example.ui.theme.ElectricViolet
 import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPinkLight
 import com.example.ui.theme.NeonPurple
 import kotlin.math.sin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+
+// Pre-allocated static brushes & shapes to avoid object allocations during recompositions
+private val NowPlayingBackgroundBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF210A3E),
+        Color(0xFF100521),
+        DarkBackground
+    )
+)
+
+private val ArtworkBorderBrush = Brush.linearGradient(
+    colors = listOf(NeonPink.copy(alpha = 0.65f), NeonPurple.copy(alpha = 0.45f))
+)
+
+private val ArtworkBackdropBrush = Brush.linearGradient(
+    colors = listOf(Color(0xFF290F4B), Color(0xFF15072A))
+)
+
+private val PlayPauseGradientBrush = Brush.linearGradient(
+    colors = listOf(NeonPink, Color(0xFFD91B82), NeonPurple)
+)
+
+private val VisualizerBarBrush = Brush.verticalGradient(
+    colors = listOf(
+        NeonPinkLight,
+        NeonPink,
+        NeonPurple.copy(alpha = 0.6f)
+    )
+)
+
+private val ArtworkCornerShape = RoundedCornerShape(30.dp)
+private val PillShape = RoundedCornerShape(50)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,26 +165,24 @@ fun NowPlayingScreen(
     val song = playerState.currentSong ?: return
 
     val artworkScale by animateFloatAsState(
-        targetValue = if (playerState.isPlaying) 1f else 0.94f,
+        targetValue = if (playerState.isPlaying) 1f else 0.96f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
         ),
         label = "artwork_scale"
     )
 
+    val onOpenQueue = remember { { showQueueSheet = true } }
+    val onShowTrackInfo = remember { { showTrackDetailsDialog = true } }
+    val onRewind10s = remember(onSeekRelative) { { onSeekRelative(-10_000L) } }
+    val onForward10s = remember(onSeekRelative) { { onSeekRelative(10_000L) } }
+    val onAddCurrentToPlaylist = remember(song, onAddToPlaylist) { { onAddToPlaylist(song) } }
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF240B42),
-                        Color(0xFF120626),
-                        DarkBackground
-                    )
-                )
-            )
+            .background(NowPlayingBackgroundBrush)
             .statusBarsPadding()
             .navigationBarsPadding()
             .testTag("now_playing_screen")
@@ -162,22 +190,22 @@ fun NowPlayingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 10.dp),
+                .padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Bar: Collapse, NOW PLAYING header, Queue
+            // 1. Top Bar: Minimize button on left, "NOW PLAYING" + Song title in center, Queue button on right
             NowPlayingTopBar(
-                album = song.album,
+                songTitle = song.title,
                 onCollapse = onCollapse,
-                onOpenQueue = { showQueueSheet = true }
+                onOpenQueue = onOpenQueue
             )
 
-            // 2. Large Glowing Rounded Album Artwork
+            // 2. Large Centered Square Album Artwork (28-32dp rounded corners, subtle neon border & glow)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 330.dp)
+                    .widthIn(max = 284.dp)
                     .weight(1f, fill = false)
                     .aspectRatio(1f)
                     .graphicsLayer {
@@ -185,51 +213,42 @@ fun NowPlayingScreen(
                         scaleY = artworkScale
                     }
                     .shadow(
-                        elevation = 24.dp,
-                        shape = RoundedCornerShape(28.dp),
-                        ambientColor = NeonPink,
-                        spotColor = NeonPurple
+                        elevation = 18.dp,
+                        shape = ArtworkCornerShape,
+                        ambientColor = NeonPink.copy(alpha = 0.65f),
+                        spotColor = NeonPurple.copy(alpha = 0.65f)
                     )
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(ArtworkCornerShape)
                     .border(
                         width = 1.5.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(NeonPink.copy(alpha = 0.7f), NeonPurple.copy(alpha = 0.5f))
-                        ),
-                        shape = RoundedCornerShape(28.dp)
+                        brush = ArtworkBorderBrush,
+                        shape = ArtworkCornerShape
                     )
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF2B104E),
-                                Color(0xFF17082E)
-                            )
-                        )
-                    ),
+                    .background(ArtworkBackdropBrush),
                 contentAlignment = Alignment.Center
             ) {
                 NowPlayingHeroArtwork(albumArtUri = song.albumArtUri)
             }
 
-            // 3. Song Title & Artist Metadata
+            // 3. Song Information (Centered title max 1-2 lines with ellipsis, Artist underneath)
             NowPlayingTrackMetadata(
                 title = song.title,
                 artist = song.artist
             )
 
-            // 4. Secondary Action Row: Favorite, Add to Playlist, and More Options
+            // 4. Essential Action Buttons (Compact Pill-Shaped: 1. Favorite, 2. Add to Playlist, 3. More)
             NowPlayingActionBar(
                 isFavorite = isFavorite,
                 queueSize = playerState.queue.size,
                 onToggleFavorite = onToggleFavorite,
-                onAddToPlaylist = { onAddToPlaylist(song) },
-                onOpenQueue = { showQueueSheet = true },
-                onRewind10s = { onSeekRelative(-10_000L) },
-                onForward10s = { onSeekRelative(10_000L) },
-                onShowTrackInfo = { showTrackDetailsDialog = true }
+                onAddToPlaylist = onAddCurrentToPlaylist,
+                onOpenQueue = onOpenQueue,
+                onRewind10s = onRewind10s,
+                onForward10s = onForward10s,
+                onShowTrackInfo = onShowTrackInfo
             )
 
-            // 5. Isolated Progress Bar & Timestamps (only section that recomposes on 200ms position ticks)
+            // 5. Progress Bar (Pink/magenta indicator, current time left, total duration right)
             NowPlayingProgressSection(
                 progress = playerState.progress,
                 durationMs = playerState.durationMs,
@@ -238,26 +257,25 @@ fun NowPlayingScreen(
                 onSeekTo = onSeekTo
             )
 
-            // 6. Primary Playback Controls: Shuffle, Previous, Play/Pause, Next, Repeat
+            // 6. Playback Controls (Shuffle, Previous, Large Play/Pause, Next, Repeat)
             NowPlayingControlsRow(
                 isPlaying = playerState.isPlaying,
                 isShuffleEnabled = playerState.isShuffleEnabled,
                 repeatMode = playerState.repeatMode,
                 onToggleShuffle = onToggleShuffle,
-                onSeekRelative = onSeekRelative,
                 onSkipPrevious = onSkipPrevious,
                 onTogglePlayPause = onTogglePlayPause,
                 onSkipNext = onSkipNext,
                 onCycleRepeatMode = onCycleRepeatMode
             )
 
-            // 7. Subtle Animated Music Waveform / Equalizer at the bottom
+            // 7. Small Subtle Audio Visualizer / Equalizer near the bottom (pauses when music is paused)
             NowPlayingWaveformVisualizer(
                 isPlaying = playerState.isPlaying,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp)
-                    .padding(horizontal = 8.dp)
+                    .height(26.dp)
+                    .padding(horizontal = 20.dp)
                     .testTag("now_playing_waveform")
             )
         }
@@ -400,7 +418,7 @@ fun NowPlayingScreen(
 
 @Composable
 private fun NowPlayingTopBar(
-    album: String,
+    songTitle: String,
     onCollapse: () -> Unit,
     onOpenQueue: () -> Unit
 ) {
@@ -411,8 +429,8 @@ private fun NowPlayingTopBar(
     ) {
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+            color = Color(0xFF221238).copy(alpha = 0.75f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f)),
             modifier = Modifier.size(42.dp)
         ) {
             IconButton(
@@ -421,9 +439,9 @@ private fun NowPlayingTopBar(
             ) {
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Collapse Player",
+                    contentDescription = "Minimize Now Playing",
                     tint = Color.White,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
@@ -441,8 +459,9 @@ private fun NowPlayingTopBar(
                 letterSpacing = 1.6.sp,
                 fontWeight = FontWeight.Bold
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = album,
+                text = songTitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -452,8 +471,8 @@ private fun NowPlayingTopBar(
 
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+            color = Color(0xFF221238).copy(alpha = 0.75f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f)),
             modifier = Modifier.size(42.dp)
         ) {
             IconButton(
@@ -464,7 +483,7 @@ private fun NowPlayingTopBar(
                     imageVector = Icons.AutoMirrored.Filled.QueueMusic,
                     contentDescription = "Open Queue",
                     tint = Color.White,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -484,7 +503,7 @@ private fun NowPlayingHeroArtwork(
                 .memoryCacheKey(key)
                 .diskCacheKey(key)
                 .crossfade(false)
-                .size(600, 600)
+                .size(512, 512)
                 .build()
         }
         AsyncImage(
@@ -508,8 +527,8 @@ private fun NowPlayingHeroArtwork(
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            NeonPink.copy(alpha = 0.35f),
-                            NeonPurple.copy(alpha = 0.15f),
+                            NeonPink.copy(alpha = 0.32f),
+                            NeonPurple.copy(alpha = 0.14f),
                             Color.Transparent
                         ),
                         center = center,
@@ -519,14 +538,14 @@ private fun NowPlayingHeroArtwork(
                     radius = maxR * 1.2f
                 )
                 drawCircle(
-                    color = NeonPurple.copy(alpha = 0.3f),
+                    color = NeonPurple.copy(alpha = 0.28f),
                     radius = maxR,
                     center = center,
                     style = Stroke(width = 2.dp.toPx())
                 )
                 drawCircle(
-                    color = NeonPink.copy(alpha = 0.4f),
-                    radius = maxR * 0.7f,
+                    color = NeonPink.copy(alpha = 0.38f),
+                    radius = maxR * 0.68f,
                     center = center,
                     style = Stroke(width = 2.dp.toPx())
                 )
@@ -535,7 +554,7 @@ private fun NowPlayingHeroArtwork(
                 imageVector = Icons.Default.MusicNote,
                 contentDescription = "Default Artwork",
                 tint = Color.White,
-                modifier = Modifier.size(88.dp)
+                modifier = Modifier.size(84.dp)
             )
         }
     }
@@ -547,20 +566,22 @@ private fun NowPlayingTrackMetadata(
     artist: String
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier.testTag("now_playing_title")
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = artist,
             style = MaterialTheme.typography.titleMedium,
@@ -594,33 +615,33 @@ private fun NowPlayingActionBar(
         // 1. Favorite Pill Button
         Surface(
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
+                .clip(PillShape)
                 .clickable(onClick = onToggleFavorite)
                 .testTag("now_playing_favorite_btn"),
-            shape = RoundedCornerShape(50),
+            shape = PillShape,
             color = if (isFavorite) {
                 NeonPink.copy(alpha = 0.22f)
             } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                Color(0xFF221238).copy(alpha = 0.7f)
             },
             border = BorderStroke(
                 1.dp,
-                if (isFavorite) NeonPink else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+                if (isFavorite) NeonPink else NeonPurple.copy(alpha = 0.35f)
             )
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
                     tint = if (isFavorite) NeonPink else Color.White,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (isFavorite) "Favorited" else "Favorite",
+                    text = "Favorite",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isFavorite) NeonPinkLight else Color.White,
                     fontWeight = FontWeight.SemiBold
@@ -631,22 +652,22 @@ private fun NowPlayingActionBar(
         // 2. Add to Playlist Pill Button
         Surface(
             modifier = Modifier
-                .clip(RoundedCornerShape(50))
+                .clip(PillShape)
                 .clickable(onClick = onAddToPlaylist)
                 .testTag("now_playing_add_playlist_btn"),
-            shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.45f))
+            shape = PillShape,
+            color = Color(0xFF221238).copy(alpha = 0.7f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.4f))
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
                     contentDescription = "Add to Playlist",
-                    tint = NeonPurple,
-                    modifier = Modifier.size(18.dp)
+                    tint = NeonPinkLight,
+                    modifier = Modifier.size(17.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
@@ -658,26 +679,26 @@ private fun NowPlayingActionBar(
             }
         }
 
-        // 3. More Options Pill Button with Dropdown
+        // 3. More Pill Button with Dropdown
         Box {
             Surface(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(PillShape)
                     .clickable { moreMenuExpanded = true }
                     .testTag("now_playing_more_btn"),
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                shape = PillShape,
+                color = Color(0xFF221238).copy(alpha = 0.7f),
+                border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.35f))
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "More Options",
                         tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
@@ -693,14 +714,6 @@ private fun NowPlayingActionBar(
                 expanded = moreMenuExpanded,
                 onDismissRequest = { moreMenuExpanded = false }
             ) {
-                DropdownMenuItem(
-                    text = { Text("Add to Playlist") },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, tint = NeonPink) },
-                    onClick = {
-                        moreMenuExpanded = false
-                        onAddToPlaylist()
-                    }
-                )
                 DropdownMenuItem(
                     text = { Text("Playback Queue ($queueSize)") },
                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = NeonPurple) },
@@ -770,7 +783,7 @@ private fun NowPlayingProgressSection(
             colors = SliderDefaults.colors(
                 thumbColor = NeonPink,
                 activeTrackColor = NeonPink,
-                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                inactiveTrackColor = Color(0xFF2B1746)
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -778,7 +791,9 @@ private fun NowPlayingProgressSection(
         )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
@@ -802,47 +817,50 @@ private fun NowPlayingControlsRow(
     isShuffleEnabled: Boolean,
     repeatMode: RepeatMode,
     onToggleShuffle: () -> Unit,
-    onSeekRelative: (Long) -> Unit,
     onSkipPrevious: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onCycleRepeatMode: () -> Unit
 ) {
+    val playPauseInteractionSource = remember { MutableInteractionSource() }
+    val isPlayPausePressed by playPauseInteractionSource.collectIsPressedAsState()
+    val playPauseScale by animateFloatAsState(
+        targetValue = if (isPlayPausePressed) 0.91f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "play_pause_press_scale"
+    )
+
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 1. Shuffle (Smaller icon, clean and minimal)
         IconButton(
             onClick = onToggleShuffle,
-            modifier = Modifier.testTag("now_playing_shuffle_btn")
+            modifier = Modifier
+                .size(44.dp)
+                .testTag("now_playing_shuffle_btn")
         ) {
             Icon(
                 imageVector = Icons.Default.Shuffle,
                 contentDescription = "Shuffle",
-                tint = if (isShuffleEnabled) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        IconButton(
-            onClick = { onSeekRelative(-10_000L) },
-            modifier = Modifier
-                .size(40.dp)
-                .testTag("now_playing_rewind_10s_btn")
-        ) {
-            Icon(
-                imageVector = Icons.Default.Replay10,
-                contentDescription = "Rewind 10 seconds",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isShuffleEnabled) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp)
             )
         }
 
+        // 2. Previous (Medium circular button, dark transparent purple background, subtle border)
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            color = Color(0xFF211037).copy(alpha = 0.78f),
             border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.35f)),
-            modifier = Modifier.size(50.dp)
+            modifier = Modifier.size(52.dp)
         ) {
             IconButton(
                 onClick = onSkipPrevious,
@@ -852,29 +870,33 @@ private fun NowPlayingControlsRow(
                     imageVector = Icons.Default.SkipPrevious,
                     contentDescription = "Previous",
                     tint = Color.White,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(26.dp)
                 )
             }
         }
 
-        // Glowing Neon Pink-Purple Play/Pause Button
+        // 3. Large Play/Pause (Main visual focus: Large circular button, neon pink/magenta gradient, soft glow, smooth press animation)
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(72.dp)
+                .size(74.dp)
+                .graphicsLayer {
+                    scaleX = playPauseScale
+                    scaleY = playPauseScale
+                }
                 .shadow(
-                    elevation = 16.dp,
+                    elevation = 18.dp,
                     shape = CircleShape,
                     ambientColor = NeonPink,
                     spotColor = NeonPink
                 )
                 .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(NeonPink, NeonPurple)
-                    )
+                .background(PlayPauseGradientBrush)
+                .clickable(
+                    interactionSource = playPauseInteractionSource,
+                    indication = null,
+                    onClick = onTogglePlayPause
                 )
-                .clickable(onClick = onTogglePlayPause)
                 .testTag("now_playing_play_pause_btn")
         ) {
             Icon(
@@ -885,11 +907,12 @@ private fun NowPlayingControlsRow(
             )
         }
 
+        // 4. Next (Medium circular button, dark transparent purple background, subtle border)
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            color = Color(0xFF211037).copy(alpha = 0.78f),
             border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.35f)),
-            modifier = Modifier.size(50.dp)
+            modifier = Modifier.size(52.dp)
         ) {
             IconButton(
                 onClick = onSkipNext,
@@ -899,28 +922,17 @@ private fun NowPlayingControlsRow(
                     imageVector = Icons.Default.SkipNext,
                     contentDescription = "Next",
                     tint = Color.White,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(26.dp)
                 )
             }
         }
 
-        IconButton(
-            onClick = { onSeekRelative(10_000L) },
-            modifier = Modifier
-                .size(40.dp)
-                .testTag("now_playing_forward_10s_btn")
-        ) {
-            Icon(
-                imageVector = Icons.Default.Forward10,
-                contentDescription = "Fast-forward 10 seconds",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-
+        // 5. Repeat (Smaller icon, clean and minimal)
         IconButton(
             onClick = onCycleRepeatMode,
-            modifier = Modifier.testTag("now_playing_repeat_btn")
+            modifier = Modifier
+                .size(44.dp)
+                .testTag("now_playing_repeat_btn")
         ) {
             val repeatIcon = when (repeatMode) {
                 RepeatMode.ONE -> Icons.Default.RepeatOne
@@ -930,71 +942,64 @@ private fun NowPlayingControlsRow(
             Icon(
                 imageVector = repeatIcon,
                 contentDescription = "Repeat Mode",
-                tint = if (isRepeatActive) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = if (isRepeatActive) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
             )
         }
     }
 }
 
 /**
- * Hardware-accelerated subtle animated music waveform / equalizer at the bottom
- * of the Now Playing screen. Executes purely in the Canvas draw phase for zero-recomposition
- * 60/90/120Hz smoothness.
+ * Small subtle audio visualizer / equalizer near the bottom of Now Playing.
+ * - Uses pink/magenta bars.
+ * - Reacts smoothly to playback at a capped ~24fps refresh rate to save CPU & battery.
+ * - Completely disables animation when music is paused (zero background ticks when paused).
  */
 @Composable
 private fun NowPlayingWaveformVisualizer(
     isPlaying: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "waveform_transition")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * Math.PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = ComposeRepeatMode.Restart
-        ),
-        label = "waveform_phase"
-    )
+    var phase by remember { mutableFloatStateOf(0f) }
+
+    // Only run the visualizer loop while music is actively playing
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            while (isActive) {
+                phase = (phase + 0.22f) % (2f * Math.PI.toFloat())
+                delay(42L) // ~24fps capped refresh rate for low CPU/battery consumption
+            }
+        }
+    }
 
     val amplitudeFactor by animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0.22f,
-        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        targetValue = if (isPlaying) 1f else 0.18f,
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "waveform_amplitude"
     )
-
-    val barBrush = remember {
-        Brush.verticalGradient(
-            colors = listOf(
-                NeonPinkLight,
-                NeonPink,
-                NeonPurple.copy(alpha = 0.65f)
-            )
-        )
-    }
 
     Canvas(
         modifier = modifier.graphicsLayer()
     ) {
-        val barCount = 32
+        val barCount = 28
         val totalWidth = size.width
         val maxHeight = size.height
-        val spacing = totalWidth / (barCount * 2f)
-        val barWidth = spacing.coerceAtLeast(3.dp.toPx())
+        val slotWidth = totalWidth / barCount
+        val barWidth = (slotWidth * 0.48f).coerceAtLeast(2.5.dp.toPx())
 
         for (i in 0 until barCount) {
             val normalizedCenterDist = 1f - kotlin.math.abs((i - barCount / 2f) / (barCount / 2f))
-            val wave1 = sin(phase + i * 0.45f) * 0.5f + 0.5f
-            val wave2 = sin(phase * 1.5f - i * 0.3f) * 0.5f + 0.5f
+            val wave1 = sin(phase + i * 0.48f) * 0.5f + 0.5f
+            val wave2 = sin(phase * 1.4f - i * 0.32f) * 0.5f + 0.5f
             val combinedWave = (wave1 * 0.65f + wave2 * 0.35f) * normalizedCenterDist
-            val fraction = (0.18f + combinedWave * 0.82f * amplitudeFactor).coerceIn(0.15f, 1f)
+            val fraction = (0.16f + combinedWave * 0.84f * amplitudeFactor).coerceIn(0.14f, 1f)
 
             val barHeight = maxHeight * fraction
-            val x = i * (totalWidth / barCount) + (totalWidth / barCount - barWidth) / 2f
+            val x = i * slotWidth + (slotWidth - barWidth) / 2f
             val y = (maxHeight - barHeight) / 2f
 
             drawRoundRect(
-                brush = barBrush,
+                brush = VisualizerBarBrush,
                 topLeft = Offset(x, y),
                 size = Size(barWidth, barHeight),
                 cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
@@ -1002,4 +1007,5 @@ private fun NowPlayingWaveformVisualizer(
         }
     }
 }
+
 
