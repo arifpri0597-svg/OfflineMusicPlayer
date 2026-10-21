@@ -9,6 +9,7 @@ import com.example.data.local.PulseDatabase
 import com.example.data.local.UserPreferences
 import com.example.data.repository.AudioScanRepository
 import com.example.data.repository.MediaRepository
+import com.example.data.repository.PlaybackStateRepository
 
 class PulseMusicApp : Application(), ImageLoaderFactory {
 
@@ -21,6 +22,9 @@ class PulseMusicApp : Application(), ImageLoaderFactory {
     lateinit var audioScanRepository: AudioScanRepository
         private set
 
+    lateinit var playbackStateRepository: PlaybackStateRepository
+        private set
+
     lateinit var userPreferences: UserPreferences
         private set
 
@@ -29,6 +33,7 @@ class PulseMusicApp : Application(), ImageLoaderFactory {
         database = PulseDatabase.getInstance(this)
         mediaRepository = MediaRepository(this)
         audioScanRepository = AudioScanRepository(this, database.musicDao())
+        playbackStateRepository = PlaybackStateRepository(this, database.musicDao())
         userPreferences = UserPreferences(this)
     }
 

@@ -178,4 +178,18 @@ interface MusicDao {
 
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: Long)
+
+    // Playback State Persistence (Single Source of Truth)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertPlaybackState(state: PlaybackStateEntity)
+
+    @Query("SELECT * FROM playback_state WHERE id = :id LIMIT 1")
+    suspend fun getPlaybackState(id: Int = PlaybackStateEntity.SINGLETON_ID): PlaybackStateEntity?
+
+    @Query("SELECT * FROM playback_state WHERE id = :id LIMIT 1")
+    fun getPlaybackStateFlow(id: Int = PlaybackStateEntity.SINGLETON_ID): Flow<PlaybackStateEntity?>
+
+    @Query("DELETE FROM playback_state")
+    suspend fun clearPlaybackState()
 }
+

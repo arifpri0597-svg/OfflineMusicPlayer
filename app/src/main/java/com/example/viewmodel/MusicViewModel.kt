@@ -76,6 +76,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as PulseMusicApp
     private val audioScanRepository = app.audioScanRepository
+    private val playbackStateRepository = app.playbackStateRepository
     private val musicDao = app.database.musicDao()
     private val userPrefs = app.userPreferences
 
@@ -84,7 +85,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         scope = viewModelScope,
         onSongPlayed = { song ->
             recordSongHistory(song)
-        }
+        },
+        playbackStateRepository = playbackStateRepository
     )
 
     val playerUiState: StateFlow<PlayerUiState> = playerController.uiState
@@ -98,10 +100,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var lastGroupedSongIds: List<Long> = emptyList()
 
     init {
+        restoreLastPlaybackState()
         observeSongsFromDatabase()
         observeFavoritesAndHistory()
         observePlaylists()
         observePreferences()
+    }
+
+    private fun restoreLastPlaybackState(librarySongs: List<Song> = emptyList()) {
+        viewModelScope.launch {
+            if (_libraryState.value.resumeLastPlayback) {
+                playerController.restorePlaybackState(librarySongs)
+            }
+        }
     }
 
     private fun observeSongsFromDatabase() {
@@ -132,6 +143,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _libraryState.update { state ->
                         state.copy(songs = songsList)
                     }
+                }
+                if (songsList.isNotEmpty() && _libraryState.value.resumeLastPlayback) {
+                    playerController.restorePlaybackState(songsList)
                 }
             }
         }
@@ -402,7 +416,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playSongFromList(song: Song, list: List<Song>) {
+        val currentState = playerController.uiState.value
         val index = list.indexOfFirst { it.id == song.id }
+        if (currentState.currentSong?.id == song.id && playerController.isInRestoredPausedState()) {
+            // Re-opening the same song after app restart: preserve the saved position (e.g., 0:42),
+            // do not auto-play until Play is pressed, and expand the Now Playing screen.
+            val targetQueue = if (index != -1) list else listOf(song)
+            val targetIndex = if (index != -1) index else 0
+            playerController.playQueue(
+                songs = targetQueue,
+                startIndex = targetIndex,
+                startPositionMs = currentState.positionMs,
+                autoPlay = false
+            )
+            _libraryState.update { it.copy(isNowPlayingExpanded = true) }
+            return
+        }
         if (index != -1) {
             playerController.playQueue(list, index)
         } else {
@@ -414,6 +443,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (songs.isEmpty()) return
         val list = if (shuffle) songs.shuffled() else songs
         playerController.playQueue(list, 0)
+    }
+
+    fun savePlaybackStateNow() {
+        playerController.saveCurrentPlaybackState(immediate = true)
     }
 
     /**
@@ -545,7 +578,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        savePlaybackStateNow()
         super.onCleared()
         playerController.release()
     }
 }
+

@@ -291,6 +291,218 @@ class PlaybackServiceTest {
         assertNull(controller.uiState.value.errorMessage)
     }
 
+    @Test
+    fun `playback position persists at 0_42 across app recent screen clear and reopening same song`(): Unit = kotlinx.coroutines.runBlocking {
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(context, com.example.data.local.PulseDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val dao = db.musicDao()
+        val repo = com.example.data.repository.PlaybackStateRepository(context, dao)
+        repo.clearPlaybackState()
+
+        val song1 = sampleSong(101L, "Midnight Pulse", durationMs = 240_000L)
+        val song2 = sampleSong(102L, "Electric Dreams", durationMs = 210_000L)
+        val songs = listOf(song1, song2)
+        dao.insertSongs(songs.map { com.example.data.local.SongEntity.fromDomainSong(it) })
+
+        val session1Player = FakePlayerHarness().apply { duration = 240_000L }
+        val session1Controller = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            onSongPlayed = { playedSongsHistory.add(it) },
+            initialPlayer = session1Player.playerProxy,
+            playbackStateRepository = repo
+        )
+
+        // 1. Open a song & 2. Play it
+        session1Controller.playQueue(songs, startIndex = 0)
+        assertTrue(session1Controller.uiState.value.isPlaying)
+
+        // 3. Advance to 0:42 (42_000ms) and pause
+        session1Player.currentPosition = 42_000L
+        session1Controller.togglePlayPause()
+        assertFalse(session1Controller.uiState.value.isPlaying)
+        assertEquals(42_000L, session1Controller.uiState.value.positionMs)
+        assertEquals("0:42", session1Controller.uiState.value.formattedPosition)
+
+        // 4. Exit app & 5. Swipe app away from Android Recent Apps
+        session1Controller.release()
+
+        // Verify saved state in repository
+        val savedInDb = repo.getLastPlaybackState()
+        assertNotNull(savedInDb)
+        assertEquals(101L, savedInDb?.songId)
+        assertEquals(42_000L, savedInDb?.positionMs)
+
+        // 6. Open the app again (brand-new controller and player instance)
+        val session2Player = FakePlayerHarness().apply { duration = 240_000L }
+        val session2Controller = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = session2Player.playerProxy,
+            playbackStateRepository = repo
+        )
+        val restored = session2Controller.restorePlaybackState(songs)
+        assertTrue("Playback state must restore on app startup", restored)
+        assertEquals(101L, session2Controller.uiState.value.currentSong?.id)
+        assertEquals(42_000L, session2Controller.uiState.value.positionMs)
+        assertEquals("0:42", session2Controller.uiState.value.formattedPosition)
+        // Must NOT auto-play on startup
+        assertFalse("Restored song must not automatically start playing", session2Controller.uiState.value.isPlaying)
+
+        // 7. Open the same song (e.g. from Recently Played / Song list in paused state)
+        session2Controller.playQueue(
+            songs = songs,
+            startIndex = 0,
+            startPositionMs = session2Controller.uiState.value.positionMs,
+            autoPlay = false
+        )
+        assertEquals(42_000L, session2Controller.uiState.value.positionMs)
+        assertEquals("0:42", session2Controller.uiState.value.formattedPosition)
+        assertFalse(session2Controller.uiState.value.isPlaying)
+
+        // Press Play -> playback starts from saved position 0:42 (42_000ms), NOT 0:00
+        session2Controller.togglePlayPause()
+        assertTrue(session2Controller.uiState.value.isPlaying)
+        assertEquals(42_000L, session2Player.currentPosition)
+        assertEquals(42_000L, session2Controller.uiState.value.positionMs)
+
+        session2Controller.release()
+        db.close()
+    }
+
+    @Test
+    fun `pause at 1_30 seek to 2_15 and track change persist and restore accurately across restarts`(): Unit = kotlinx.coroutines.runBlocking {
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(context, com.example.data.local.PulseDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val dao = db.musicDao()
+        val repo = com.example.data.repository.PlaybackStateRepository(context, dao)
+        repo.clearPlaybackState()
+
+        val song1 = sampleSong(201L, "Track One", durationMs = 300_000L)
+        val song2 = sampleSong(202L, "Track Two", durationMs = 260_000L)
+        val songs = listOf(song1, song2)
+        dao.insertSongs(songs.map { com.example.data.local.SongEntity.fromDomainSong(it) })
+
+        val player1 = FakePlayerHarness().apply { duration = 300_000L }
+        val ctrl1 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            onSongPlayed = { playedSongsHistory.add(it) },
+            initialPlayer = player1.playerProxy,
+            playbackStateRepository = repo
+        )
+
+        // Scenario A: Pause at 1:30 (90_000ms) -> reopen -> 1:30
+        ctrl1.playQueue(songs, startIndex = 0)
+        player1.currentPosition = 90_000L
+        ctrl1.togglePlayPause()
+        ctrl1.release()
+
+        val player2 = FakePlayerHarness().apply { duration = 300_000L }
+        val ctrl2 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player2.playerProxy,
+            playbackStateRepository = repo
+        )
+        assertTrue(ctrl2.restorePlaybackState(songs))
+        assertEquals(90_000L, ctrl2.uiState.value.positionMs)
+        assertEquals("1:30", ctrl2.uiState.value.formattedPosition)
+
+        // Scenario B: Seek from 1:30 to 2:15 (135_000ms) -> reopen -> 2:15 (never overwritten by old position)
+        ctrl2.seekTo(135_000L)
+        assertEquals(135_000L, ctrl2.uiState.value.positionMs)
+        ctrl2.release()
+
+        val player3 = FakePlayerHarness().apply { duration = 300_000L }
+        val ctrl3 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            onSongPlayed = { playedSongsHistory.add(it) },
+            initialPlayer = player3.playerProxy,
+            playbackStateRepository = repo
+        )
+        assertTrue(ctrl3.restorePlaybackState(songs))
+        assertEquals(201L, ctrl3.uiState.value.currentSong?.id)
+        assertEquals(135_000L, ctrl3.uiState.value.positionMs)
+        assertEquals("2:15", ctrl3.uiState.value.formattedPosition)
+
+        // Scenario C: Change song to song2 and play/pause at 0:55 (55_000ms) -> reopen -> restores song2 at 0:55
+        ctrl3.playQueue(songs, startIndex = 1)
+        player3.duration = 260_000L
+        ctrl3.seekTo(55_000L)
+        ctrl3.togglePlayPause()
+        ctrl3.release()
+
+        val player4 = FakePlayerHarness().apply { duration = 260_000L }
+        val ctrl4 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player4.playerProxy,
+            playbackStateRepository = repo
+        )
+        assertTrue(ctrl4.restorePlaybackState(songs))
+        assertEquals(202L, ctrl4.uiState.value.currentSong?.id)
+        assertEquals(1, ctrl4.uiState.value.currentIndex)
+        assertEquals(55_000L, ctrl4.uiState.value.positionMs)
+        assertEquals("0:55", ctrl4.uiState.value.formattedPosition)
+        // Verify Recently Played recorded both tracks
+        assertTrue(playedSongsHistory.map { it.id }.containsAll(listOf(201L, 202L)))
+
+        ctrl4.release()
+        db.close()
+    }
+
+    @Test
+    fun `playbackService persists state on onTaskRemoved and restores into new service instance`(): Unit = kotlinx.coroutines.runBlocking {
+        val serviceController1 = Robolectric.buildService(PlaybackService::class.java)
+        val service1 = serviceController1.create().get()
+        service1.playbackStateRepository.clearPlaybackState()
+
+        val extras = android.os.Bundle().apply {
+            putLong("durationMs", 180_000L)
+            putString("contentUri", "content://media/external/audio/media/303")
+        }
+        val metadata = androidx.media3.common.MediaMetadata.Builder()
+            .setTitle("Cyberpunk Theme")
+            .setArtist("Neon Runner")
+            .setAlbumTitle("Night City")
+            .setExtras(extras)
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setMediaId("303")
+            .setUri(Uri.parse("content://media/external/audio/media/303"))
+            .setMediaMetadata(metadata)
+            .build()
+
+        service1.player.setMediaItems(listOf(mediaItem), 0, 42_000L)
+        service1.player.seekTo(0, 42_000L)
+        service1.player.playWhenReady = false
+
+        // Simulate swiping app away from Recent Apps
+        service1.onTaskRemoved(Intent())
+        serviceController1.destroy()
+
+        val savedState = service1.playbackStateRepository.getLastPlaybackState()
+        assertNotNull(savedState)
+        assertEquals(303L, savedState?.songId)
+        assertEquals(42_000L, savedState?.positionMs)
+
+        // Start a brand-new PlaybackService and verify restoration
+        val serviceController2 = Robolectric.buildService(PlaybackService::class.java)
+        val service2 = serviceController2.create().get()
+        val restoredInService = service2.restoreSavedPlaybackStateIfIdle()
+        assertTrue(restoredInService || service2.player.mediaItemCount == 1)
+        assertEquals("303", service2.player.currentMediaItem?.mediaId)
+        assertEquals(42_000L, service2.player.currentPosition)
+        assertFalse(service2.player.playWhenReady)
+
+        serviceController2.destroy()
+        Unit
+    }
+
     private class FakePlayerHarness {
         val listeners = mutableListOf<Player.Listener>()
         val mediaItems = mutableListOf<MediaItem>()

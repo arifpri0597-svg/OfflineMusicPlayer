@@ -768,12 +768,18 @@ private fun NowPlayingProgressSection(
         progress
     }
 
+    val displayedPositionText = if (isDraggingSlider && durationMs > 0L) {
+        Song.formatDurationMs((sliderDragPosition * durationMs).toLong())
+    } else {
+        formattedPosition
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Slider(
             value = currentSliderValue,
             onValueChange = { newValue ->
                 isDraggingSlider = true
-                sliderDragPosition = newValue
+                sliderDragPosition = newValue.coerceIn(0f, 1f)
             },
             onValueChangeFinished = {
                 val targetPositionMs = (sliderDragPosition * durationMs).toLong()
@@ -797,15 +803,17 @@ private fun NowPlayingProgressSection(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = formattedPosition,
+                text = displayedPositionText,
                 style = MaterialTheme.typography.labelMedium,
                 color = NeonPinkLight,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.testTag("now_playing_position_text")
             )
             Text(
                 text = formattedDuration,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("now_playing_duration_text")
             )
         }
     }

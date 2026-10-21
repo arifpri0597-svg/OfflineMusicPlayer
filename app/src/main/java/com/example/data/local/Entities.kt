@@ -131,3 +131,54 @@ data class PlaylistWithCount(
         trackCount = trackCount
     )
 }
+
+@Immutable
+@Entity(tableName = "playback_state")
+data class PlaybackStateEntity(
+    @PrimaryKey
+    val id: Int = SINGLETON_ID,
+    val songId: Long,
+    val contentUriString: String,
+    val title: String = "",
+    val artist: String = "",
+    val album: String = "",
+    val albumArtUriString: String? = null,
+    val positionMs: Long,
+    val durationMs: Long,
+    val queueSongIdsCsv: String = "",
+    val currentIndex: Int = 0,
+    val isPlaying: Boolean = false,
+    val shuffleEnabled: Boolean = false,
+    val repeatMode: String = "OFF",
+    val lastUpdated: Long = System.currentTimeMillis()
+) {
+    fun parseQueueSongIds(): List<Long> {
+        if (queueSongIdsCsv.isBlank()) return emptyList()
+        return queueSongIdsCsv.split(',')
+            .mapNotNull { it.trim().toLongOrNull() }
+    }
+
+    fun toFallbackSong(): Song? {
+        if (songId == 0L && contentUriString.isBlank()) return null
+        val parsedUri = try {
+            Uri.parse(contentUriString)
+        } catch (_: Exception) {
+            return null
+        }
+        if (parsedUri.scheme.isNullOrBlank()) return null
+        return Song(
+            id = songId,
+            title = title.ifBlank { "Unknown Title" },
+            artist = artist.ifBlank { "Unknown Artist" },
+            album = album.ifBlank { "Unknown Album" },
+            durationMs = durationMs.coerceAtLeast(0L),
+            contentUri = parsedUri,
+            albumArtUri = albumArtUriString?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+        )
+    }
+
+    companion object {
+        const val SINGLETON_ID = 1
+    }
+}
+

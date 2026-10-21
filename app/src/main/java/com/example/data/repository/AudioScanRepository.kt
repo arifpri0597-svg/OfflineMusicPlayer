@@ -285,4 +285,21 @@ class AudioScanRepository(
             }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
+
+    private val playbackStateRepository by lazy {
+        PlaybackStateRepository(context, musicDao)
+    }
+
+    suspend fun savePlaybackState(state: com.example.data.local.PlaybackStateEntity) {
+        playbackStateRepository.savePlaybackState(state)
+    }
+
+    suspend fun getLastPlaybackState(): com.example.data.local.PlaybackStateEntity? {
+        return playbackStateRepository.getLastPlaybackState()
+    }
+
+    suspend fun clearPlaybackState() {
+        playbackStateRepository.clearPlaybackState()
+    }
 }
+

@@ -177,6 +177,16 @@ class MainActivity : ComponentActivity() {
         viewModel.onPermissionResult(hasPermission)
     }
 
+    override fun onPause() {
+        super.onPause()
+        viewModel.savePlaybackStateNow()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.savePlaybackStateNow()
+    }
+
     private fun checkAudioPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(

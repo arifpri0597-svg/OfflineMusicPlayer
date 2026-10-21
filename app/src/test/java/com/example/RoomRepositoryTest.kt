@@ -332,6 +332,167 @@ class RoomRepositoryTest {
         assertEquals(2, mediaRepository.queryFolders(mediaRepoSongs).size)
     }
 
+    @Test
+    fun `playbackStateRepository saves gets updates and clears playback state while preserving history`() = runBlocking {
+        val repo = com.example.data.repository.PlaybackStateRepository(context, musicDao)
+        repo.clearPlaybackState()
+
+        val song1 = createSampleSongEntity(10L, "Neon Horizon", artist = "Synthwave").toDomainSong()
+        val song2 = createSampleSongEntity(20L, "Midnight Drive", artist = "Outrun").toDomainSong()
+        musicDao.insertSongs(
+            listOf(
+                com.example.data.local.SongEntity.fromDomainSong(song1),
+                com.example.data.local.SongEntity.fromDomainSong(song2)
+            )
+        )
+        musicDao.insertHistory(HistoryEntity(songId = 10L, title = song1.title, artist = song1.artist, playedAt = 1000L))
+
+        // Save position at 0:42 (42_000L)
+        repo.savePlaybackState(
+            song = song1,
+            positionMs = 42_000L,
+            durationMs = 180_000L,
+            queueSongIds = listOf(10L, 20L),
+            currentIndex = 0,
+            isPlaying = false,
+            shuffleEnabled = true,
+            repeatMode = com.example.data.model.RepeatMode.ALL
+        )
+
+        val saved = repo.getLastPlaybackState()
+        assertNotNull(saved)
+        assertEquals(10L, saved?.songId)
+        assertEquals(42_000L, saved?.positionMs)
+        assertEquals(180_000L, saved?.durationMs)
+        assertEquals(listOf(10L, 20L), saved?.parseQueueSongIds())
+        assertEquals(0, saved?.currentIndex)
+        assertFalse(saved?.isPlaying ?: true)
+        assertTrue(saved?.shuffleEnabled ?: false)
+        assertEquals("ALL", saved?.repeatMode)
+
+        // Update position via seek to 1:35 (95_000L)
+        repo.savePlaybackState(
+            song = song1,
+            positionMs = 95_000L,
+            durationMs = 180_000L,
+            queueSongIds = listOf(10L, 20L),
+            currentIndex = 0,
+            isPlaying = true
+        )
+        val updated = audioScanRepository.getLastPlaybackState()
+        assertEquals(95_000L, updated?.positionMs)
+
+        // Verify Recently Played (history) is completely untouched
+        val history = musicDao.getHistory().first()
+        assertEquals(1, history.size)
+        assertEquals(10L, history.first().songId)
+
+        // Clear playback state
+        repo.clearPlaybackState()
+        assertNull(repo.getLastPlaybackState())
+        // History still intact after clearing playback state
+        assertEquals(1, musicDao.getHistory().first().size)
+    }
+
+    @Test
+    fun `playbackStateRepository handles edge cases clamping moved deleted and corrupted states`() = runBlocking {
+        val repo = com.example.data.repository.PlaybackStateRepository(context, musicDao)
+        repo.clearPlaybackState()
+
+        val activeSong = createSampleSongEntity(
+            id = 55L,
+            title = "Starlight Echo",
+            artist = "Luna"
+        ).copy(durationMs = 150_000L).toDomainSong()
+        val secondSong = createSampleSongEntity(
+            id = 66L,
+            title = "Deep Space",
+            artist = "Luna"
+        ).toDomainSong()
+        val librarySongs = listOf(activeSong, secondSong)
+
+        // 1. Position greater than actual track duration (e.g. duration changed from 240s to 150s, saved pos 200s)
+        val overflowState = com.example.data.local.PlaybackStateEntity(
+            songId = 55L,
+            contentUriString = activeSong.contentUri.toString(),
+            title = activeSong.title,
+            artist = activeSong.artist,
+            positionMs = 200_000L,
+            durationMs = 240_000L,
+            queueSongIdsCsv = "55,66,999", // 999 was deleted
+            currentIndex = 0
+        )
+        val clampedSession = repo.resolveRestoredSession(overflowState, librarySongs)
+        assertNotNull(clampedSession)
+        assertEquals(150_000L, clampedSession?.durationMs)
+        assertEquals(150_000L, clampedSession?.positionMs)
+        // Deleted song 999 is pruned from restored queue
+        assertEquals(listOf(55L, 66L), clampedSession?.queue?.map { it.id })
+
+        // 2. Negative position clamps to 0L
+        val negativePosState = overflowState.copy(positionMs = -15_000L)
+        val zeroClampedSession = repo.resolveRestoredSession(negativePosState, librarySongs)
+        assertEquals(0L, zeroClampedSession?.positionMs)
+
+        // 3. Moved/re-indexed audio file (old ID 111 and old URI, but same Title + Artist in library)
+        val movedState = com.example.data.local.PlaybackStateEntity(
+            songId = 111L,
+            contentUriString = "content://media/external/audio/media/111",
+            title = "Starlight Echo",
+            artist = "Luna",
+            positionMs = 42_000L,
+            durationMs = 150_000L
+        )
+        val movedSession = repo.resolveRestoredSession(movedState, librarySongs)
+        assertNotNull("Moved file should resolve by title and artist", movedSession)
+        assertEquals(55L, movedSession?.currentSong?.id)
+        assertEquals(42_000L, movedSession?.positionMs)
+
+        // 4. Deleted audio file (not in librarySongs and MediaStore URI no longer exists)
+        val deletedState = com.example.data.local.PlaybackStateEntity(
+            songId = 888L,
+            contentUriString = "content://media/external/audio/media/888",
+            title = "Deleted Track",
+            artist = "Ghost",
+            positionMs = 30_000L,
+            durationMs = 180_000L
+        )
+        repo.savePlaybackState(deletedState)
+        val deletedSession = repo.resolveRestoredSession(deletedState, librarySongs)
+        assertNull("Deleted song should not restore", deletedSession)
+        assertNull("Deleted song state should be cleared", repo.getLastPlaybackState())
+
+        // 5. Invalid/corrupted media URI (disallowed http scheme or empty)
+        val invalidUriState = com.example.data.local.PlaybackStateEntity(
+            songId = 55L,
+            contentUriString = "http://example.com/malicious.mp3",
+            positionMs = 10_000L,
+            durationMs = 150_000L
+        )
+        repo.savePlaybackState(invalidUriState)
+        assertNull("Invalid URI scheme must be rejected", repo.getLastPlaybackState())
+    }
+
+    @Test
+    fun `database MIGRATION_3_4 safely creates playback_state table without losing existing data`() = runBlocking {
+        val supportDb = database.openHelper.writableDatabase
+        PulseDatabase.MIGRATION_3_4.migrate(supportDb)
+
+        val entity = com.example.data.local.PlaybackStateEntity(
+            songId = 77L,
+            contentUriString = "content://media/external/audio/media/77",
+            title = "Migrated Song",
+            artist = "Migrated Artist",
+            positionMs = 42_000L,
+            durationMs = 180_000L
+        )
+        musicDao.upsertPlaybackState(entity)
+        val loaded = musicDao.getPlaybackState()
+        assertNotNull(loaded)
+        assertEquals(77L, loaded?.songId)
+        assertEquals(42_000L, loaded?.positionMs)
+    }
+
     class FakeMediaStoreProvider : ContentProvider() {
         companion object {
             var cursorFactory: (() -> Cursor?)? = null
@@ -353,3 +514,4 @@ class RoomRepositoryTest {
         override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
     }
 }
+

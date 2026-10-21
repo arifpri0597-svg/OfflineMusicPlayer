@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -11,9 +13,10 @@ import androidx.room.RoomDatabase
         FavoriteEntity::class,
         HistoryEntity::class,
         PlaylistEntity::class,
-        PlaylistSongCrossRef::class
+        PlaylistSongCrossRef::class,
+        PlaybackStateEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class PulseDatabase : RoomDatabase() {
@@ -23,6 +26,33 @@ abstract class PulseDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: PulseDatabase? = null
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `playback_state` (
+                        `id` INTEGER NOT NULL,
+                        `songId` INTEGER NOT NULL,
+                        `contentUriString` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `album` TEXT NOT NULL,
+                        `albumArtUriString` TEXT,
+                        `positionMs` INTEGER NOT NULL,
+                        `durationMs` INTEGER NOT NULL,
+                        `queueSongIdsCsv` TEXT NOT NULL,
+                        `currentIndex` INTEGER NOT NULL,
+                        `isPlaying` INTEGER NOT NULL,
+                        `shuffleEnabled` INTEGER NOT NULL,
+                        `repeatMode` TEXT NOT NULL,
+                        `lastUpdated` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): PulseDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -31,6 +61,7 @@ abstract class PulseDatabase : RoomDatabase() {
                     "pulse_music_database.db"
                 )
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                    .addMigrations(MIGRATION_3_4)
                     .fallbackToDestructiveMigration(true)
                     .build()
                 INSTANCE = instance
@@ -39,3 +70,4 @@ abstract class PulseDatabase : RoomDatabase() {
         }
     }
 }
+
