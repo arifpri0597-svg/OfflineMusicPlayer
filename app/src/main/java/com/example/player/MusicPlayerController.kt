@@ -43,7 +43,6 @@ private data class PendingPlayRequest(
 class MusicPlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val onSongPlayed: (Song) -> Unit = {},
     initialPlayer: Player? = null,
     private val playbackStateRepository: PlaybackStateRepository? = null
 ) {
@@ -57,7 +56,6 @@ class MusicPlayerController(
     private var activeQueue: MutableList<Song> = mutableListOf()
     private var immutableQueue: List<Song> = emptyList()
     private var pendingPlayRequest: PendingPlayRequest? = null
-    private var lastRecordedSongId: Long? = null
 
     private var isRestoredPausedState: Boolean = false
     private var restoredPositionFloorMs: Long? = null
@@ -408,7 +406,6 @@ class MusicPlayerController(
         isRestoredPausedState = true
         isUserInitiatedPlayback = false
         restoredPositionFloorMs = effectivePos
-        lastRecordedSongId = session.currentSong.id
         lastSavedSongId = session.currentSong.id
         lastSavedPositionMs = effectivePos
 
@@ -562,10 +559,6 @@ class MusicPlayerController(
                     errorMessage = null
                 )
             }
-            if (targetSong.id != lastRecordedSongId) {
-                lastRecordedSongId = targetSong.id
-                onSongPlayed(targetSong)
-            }
             saveCurrentPlaybackState(
                 positionOverride = resolvedPositionMs,
                 isPlayingOverride = autoPlay,
@@ -611,10 +604,6 @@ class MusicPlayerController(
                 isPlaying = autoPlay,
                 errorMessage = null
             )
-        }
-        if (targetSong.id != lastRecordedSongId) {
-            lastRecordedSongId = targetSong.id
-            onSongPlayed(targetSong)
         }
         saveCurrentPlaybackState(
             positionOverride = resolvedPositionMs,
@@ -1129,11 +1118,6 @@ class MusicPlayerController(
                 playbackSpeed = speed,
                 queue = immutableQueue
             )
-        }
-
-        if (currentSong != null && currentSong.id != lastRecordedSongId) {
-            lastRecordedSongId = currentSong.id
-            onSongPlayed(currentSong)
         }
     }
 

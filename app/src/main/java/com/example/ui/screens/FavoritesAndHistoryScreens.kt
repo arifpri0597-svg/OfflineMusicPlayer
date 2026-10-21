@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
@@ -147,84 +146,3 @@ fun FavoritesScreen(
     }
 }
 
-@Composable
-fun HistoryScreen(
-    recentSongs: List<Song>,
-    currentSongId: Long?,
-    isPlaying: Boolean,
-    favoriteIds: Set<Long>,
-    onSongClick: (Song, List<Song>) -> Unit,
-    onClearHistory: () -> Unit,
-    onToggleFavorite: (Long) -> Unit,
-    onPlayNext: (Song) -> Unit,
-    onAddToQueue: (Song) -> Unit,
-    onAddToPlaylist: (Song) -> Unit = {},
-    modifier: Modifier = Modifier
-) {
-    if (recentSongs.isEmpty()) {
-        EmptyStateView(
-            icon = Icons.Default.History,
-            title = "No Playback History",
-            description = "Songs you listen to will be recorded locally so you can easily replay your favorite recent moments.",
-            modifier = modifier.fillMaxSize()
-        )
-    } else {
-        LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .testTag("history_screen"),
-            contentPadding = PaddingValues(bottom = 96.dp)
-        ) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Playback History",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${recentSongs.size} recently played",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onClearHistory,
-                        modifier = Modifier.testTag("clear_history_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteSweep,
-                            contentDescription = "Clear history",
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-            }
-
-            items(
-                items = recentSongs,
-                key = { it.id },
-                contentType = { "history_song" }
-            ) { song ->
-                SongItemRow(
-                    song = song,
-                    isPlaying = isPlaying && currentSongId == song.id,
-                    isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onSongClick(song, recentSongs) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onPlayNext = { onPlayNext(song) },
-                    onAddToQueue = { onAddToQueue(song) },
-                    onAddToPlaylist = { onAddToPlaylist(song) }
-                )
-            }
-        }
-    }
-}

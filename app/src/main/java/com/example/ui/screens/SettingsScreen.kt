@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 fun SettingsScreen(
     currentTheme: String,
     onThemeChange: (String) -> Unit,
-    onClearHistory: () -> Unit,
     onClearFavorites: () -> Unit,
     resumeLastPlayback: Boolean = true,
     onResumeLastChange: (Boolean) -> Unit = {},
@@ -58,7 +57,6 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
-    var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
     var showAudioFocusDialog by remember { mutableStateOf(false) }
 
@@ -129,13 +127,6 @@ fun SettingsScreen(
         item(key = "settings_data", contentType = "section") {
             SectionHeader(title = "Data Management")
             SettingsCard {
-                SettingsItem(
-                    icon = Icons.Default.Delete,
-                    title = "Clear Playback History",
-                    subtitle = "Remove all entries from recently played tracks",
-                    onClick = { showClearHistoryDialog = true },
-                    tag = "clear_history_setting"
-                )
                 SettingsItem(
                     icon = Icons.Default.Delete,
                     title = "Clear Favorites",
@@ -259,30 +250,6 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = { showAudioFocusDialog = false }) {
                     Text("OK")
-                }
-            }
-        )
-    }
-
-    // Clear History Dialog
-    if (showClearHistoryDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearHistoryDialog = false },
-            title = { Text("Clear History?") },
-            text = { Text("This will permanently remove all tracks from your playback history.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onClearHistory()
-                        showClearHistoryDialog = false
-                    }
-                ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearHistoryDialog = false }) {
-                    Text("Cancel")
                 }
             }
         )

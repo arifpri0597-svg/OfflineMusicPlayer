@@ -10,7 +10,6 @@ import android.provider.MediaStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FavoriteEntity
-import com.example.data.local.HistoryEntity
 import com.example.data.local.MusicDao
 import com.example.data.local.PlaylistEntity
 import com.example.data.local.PlaylistSongCrossRef
@@ -134,19 +133,6 @@ class RoomRepositoryTest {
 
         musicDao.clearFavorites()
         assertTrue(musicDao.getAllFavoriteIds().first().isEmpty())
-    }
-
-    @Test
-    fun `dao records and orders playback history`() = runBlocking {
-        musicDao.insertHistory(HistoryEntity(songId = 1L, title = "Track 1", artist = "Artist 1", playedAt = 100L))
-        musicDao.insertHistory(HistoryEntity(songId = 2L, title = "Track 2", artist = "Artist 2", playedAt = 300L))
-        musicDao.insertHistory(HistoryEntity(songId = 3L, title = "Track 3", artist = "Artist 3", playedAt = 200L))
-
-        val history = musicDao.getHistory().first()
-        assertEquals(listOf(2L, 3L, 1L), history.map { it.songId })
-
-        musicDao.clearHistory()
-        assertTrue(musicDao.getHistory().first().isEmpty())
     }
 
     @Test
@@ -333,7 +319,7 @@ class RoomRepositoryTest {
     }
 
     @Test
-    fun `playbackStateRepository saves gets updates and clears playback state while preserving history`() = runBlocking {
+    fun `playbackStateRepository saves gets updates and clears playback state while preserving favorites`() = runBlocking {
         val repo = com.example.data.repository.PlaybackStateRepository(context, musicDao)
         repo.clearPlaybackState()
 
@@ -345,7 +331,7 @@ class RoomRepositoryTest {
                 com.example.data.local.SongEntity.fromDomainSong(song2)
             )
         )
-        musicDao.insertHistory(HistoryEntity(songId = 10L, title = song1.title, artist = song1.artist, playedAt = 1000L))
+        musicDao.insertFavorite(FavoriteEntity(songId = 10L, addedAt = 1000L))
 
         // Save position at 0:42 (42_000L)
         repo.savePlaybackState(
@@ -382,16 +368,15 @@ class RoomRepositoryTest {
         val updated = audioScanRepository.getLastPlaybackState()
         assertEquals(95_000L, updated?.positionMs)
 
-        // Verify Recently Played (history) is completely untouched
-        val history = musicDao.getHistory().first()
-        assertEquals(1, history.size)
-        assertEquals(10L, history.first().songId)
+        // Verify Favorites are completely untouched
+        val favIds = musicDao.getAllFavoriteIds().first()
+        assertEquals(listOf(10L), favIds)
 
         // Clear playback state
         repo.clearPlaybackState()
         assertNull(repo.getLastPlaybackState())
-        // History still intact after clearing playback state
-        assertEquals(1, musicDao.getHistory().first().size)
+        // Favorites still intact after clearing playback state
+        assertEquals(listOf(10L), musicDao.getAllFavoriteIds().first())
     }
 
     @Test
@@ -474,10 +459,11 @@ class RoomRepositoryTest {
     }
 
     @Test
-    fun `database MIGRATION_3_4 and MIGRATION_4_5 safely create and upgrade playback_state table without losing existing data`() = runBlocking {
+    fun `database MIGRATION_3_4 MIGRATION_4_5 and MIGRATION_5_6 safely upgrade playback_state table without losing existing data`() = runBlocking {
         val supportDb = database.openHelper.writableDatabase
         PulseDatabase.MIGRATION_3_4.migrate(supportDb)
         PulseDatabase.MIGRATION_4_5.migrate(supportDb)
+        PulseDatabase.MIGRATION_5_6.migrate(supportDb)
 
         val entity = com.example.data.local.PlaybackStateEntity(
             songId = 77L,

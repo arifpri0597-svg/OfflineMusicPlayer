@@ -11,12 +11,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         SongEntity::class,
         FavoriteEntity::class,
-        HistoryEntity::class,
         PlaylistEntity::class,
         PlaylistSongCrossRef::class,
         PlaybackStateEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class PulseDatabase : RoomDatabase() {
@@ -68,6 +67,15 @@ abstract class PulseDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                try {
+                    db.execSQL("DROP TABLE IF EXISTS `history`")
+                } catch (_: Exception) {
+                }
+            }
+        }
+
         fun getInstance(context: Context): PulseDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -76,7 +84,7 @@ abstract class PulseDatabase : RoomDatabase() {
                     "pulse_music_database.db"
                 )
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration(true)
                     .build()
                 INSTANCE = instance

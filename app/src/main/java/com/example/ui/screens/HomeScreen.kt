@@ -29,10 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -79,7 +77,6 @@ import com.example.ui.components.SongItemRow
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkBackgroundSecondary
 import com.example.ui.theme.DeepViolet
-import com.example.ui.theme.ElectricViolet
 import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPinkLight
 import com.example.ui.theme.NeonPurple
@@ -116,13 +113,6 @@ private val HeroBarBrush = Brush.verticalGradient(
     colors = listOf(NeonPinkLight, NeonPink, NeonPurple)
 )
 
-private val RecentThumbBrush = Brush.linearGradient(
-    colors = listOf(
-        ElectricViolet.copy(alpha = 0.5f),
-        NeonPink.copy(alpha = 0.35f)
-    )
-)
-
 private val HomeAlbumBackdropBrush = Brush.linearGradient(
     colors = listOf(
         DeepViolet,
@@ -131,8 +121,6 @@ private val HomeAlbumBackdropBrush = Brush.linearGradient(
 )
 
 private val ActionButtonShape = RoundedCornerShape(18.dp)
-private val RecentCardShape = RoundedCornerShape(18.dp)
-private val RecentArtShape = RoundedCornerShape(14.dp)
 private val HomeAlbumCardShape = RoundedCornerShape(20.dp)
 private val QuickAccessPillShape = RoundedCornerShape(16.dp)
 
@@ -141,7 +129,6 @@ fun HomeScreen(
     songs: List<Song>,
     albums: List<Album>,
     favoriteSongs: List<Song>,
-    recentSongs: List<Song>,
     currentSongId: Long?,
     isPlaying: Boolean,
     onSongClick: (Song, List<Song>) -> Unit,
@@ -157,7 +144,6 @@ fun HomeScreen(
     onNavigateToPlaylists: () -> Unit = {},
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToArtists: () -> Unit = {},
-    onNavigateToHistory: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     playlistCount: Int = 0,
     artistCount: Int = 0,
@@ -190,9 +176,6 @@ fun HomeScreen(
         return
     }
 
-    val displayedRecentSongs = remember(recentSongs, songs) {
-        if (recentSongs.isNotEmpty()) recentSongs.take(10) else songs.take(8)
-    }
     val albumsPreview = remember(albums) { albums.take(10) }
     val favoritesPreview = remember(favoriteSongs) { favoriteSongs.take(5) }
     val filteredAllTracks = remember(songs, searchQuery) {
@@ -358,76 +341,13 @@ fun HomeScreen(
             }
         }
 
-        // 4. Recently Played Section (Horizontal Cards)
-        if (displayedRecentSongs.isNotEmpty() && searchQuery.isBlank()) {
-            item(key = "home_recent_section", contentType = "carousel") {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = NeonPink,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Recently Played",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
-                        Text(
-                            text = "History",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = NeonPink,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable(onClick = onNavigateToHistory)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .testTag("home_view_history_btn")
-                        )
-                    }
-
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        items(
-                            items = displayedRecentSongs,
-                            key = { it.id },
-                            contentType = { "recent_card" }
-                        ) { song ->
-                            RecentSongHorizontalCard(
-                                song = song,
-                                isPlaying = isPlaying && currentSongId == song.id,
-                                onClick = { onSongClick(song, displayedRecentSongs) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. Albums Carousel Section
+        // 4. Albums Carousel Section
         if (albumsPreview.isNotEmpty() && searchQuery.isBlank()) {
             item(key = "home_albums_section", contentType = "carousel") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 20.dp)
+                        .padding(top = 16.dp)
                 ) {
                     Row(
                         modifier = Modifier
@@ -488,7 +408,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 6.dp),
+                        .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -537,12 +457,12 @@ fun HomeScreen(
             }
         }
 
-        // 6. All Tracks Section
+        // 5. All Tracks Section
         item(key = "home_all_tracks_header", contentType = "section_header") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 6.dp),
+                    .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -842,121 +762,6 @@ private fun PureTuneHeroBanner(
                         color = Color.White.copy(alpha = 0.85f)
                     )
                 }
-            }
-        }
-    }
-}
-
-/**
- * Horizontal card for Recently Played tracks with lazy-loaded artwork,
- * track metadata, and active playback indicator.
- */
-@Composable
-private fun RecentSongHorizontalCard(
-    song: Song,
-    isPlaying: Boolean,
-    onClick: () -> Unit
-) {
-    val context = LocalContext.current
-    Card(
-        modifier = Modifier
-            .width(228.dp)
-            .clip(RecentCardShape)
-            .clickable(onClick = onClick),
-        shape = RecentCardShape,
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-        ),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isPlaying) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-            }
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RecentArtShape)
-                    .background(RecentThumbBrush),
-                contentAlignment = Alignment.Center
-            ) {
-                if (song.albumArtUri != null) {
-                    val imageRequest = remember(song.albumArtUri) {
-                        val key = "recent_${song.albumArtUri}"
-                        ImageRequest.Builder(context)
-                            .data(song.albumArtUri)
-                            .memoryCacheKey(key)
-                            .diskCacheKey(key)
-                            .crossfade(false)
-                            .size(160, 160)
-                            .build()
-                    }
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = song.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = song.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = song.formattedDuration,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NeonPinkLight.copy(alpha = 0.85f)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(ActionGradientBrush),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Equalizer else Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
             }
         }
     }

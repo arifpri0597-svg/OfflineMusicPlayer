@@ -105,16 +105,6 @@ interface MusicDao {
     @Query("DELETE FROM favorites")
     suspend fun clearFavorites()
 
-    // Playback History
-    @Query("SELECT * FROM history ORDER BY playedAt DESC LIMIT 100")
-    fun getHistory(): Flow<List<HistoryEntity>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertHistory(history: HistoryEntity)
-
-    @Query("DELETE FROM history")
-    suspend fun clearHistory()
-
     // Playlists
     @Query("SELECT * FROM playlists ORDER BY createdAt DESC")
     fun getAllPlaylists(): Flow<List<PlaylistEntity>>

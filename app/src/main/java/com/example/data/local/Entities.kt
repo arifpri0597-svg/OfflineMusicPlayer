@@ -79,23 +79,6 @@ data class FavoriteEntity(
     val addedAt: Long = System.currentTimeMillis()
 )
 
-@Immutable
-@Entity(
-    tableName = "history",
-    indices = [
-        Index(value = ["playedAt"]),
-        Index(value = ["songId"])
-    ]
-)
-data class HistoryEntity(
-    @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
-    val songId: Long,
-    val title: String,
-    val artist: String,
-    val playedAt: Long = System.currentTimeMillis()
-)
-
 @Entity(tableName = "playlists")
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true)

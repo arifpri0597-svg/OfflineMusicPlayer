@@ -41,18 +41,15 @@ class PlaybackServiceTest {
     private lateinit var testScope: CoroutineScope
     private lateinit var fakePlayer: FakePlayerHarness
     private lateinit var controller: MusicPlayerController
-    private val playedSongsHistory = mutableListOf<Song>()
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         testScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        playedSongsHistory.clear()
         fakePlayer = FakePlayerHarness()
         controller = MusicPlayerController(
             context = context,
             scope = testScope,
-            onSongPlayed = { playedSongsHistory.add(it) },
             initialPlayer = fakePlayer.playerProxy
         )
     }
@@ -129,7 +126,6 @@ class PlaybackServiceTest {
         val disconnectedController = MusicPlayerController(
             context = context,
             scope = testScope,
-            onSongPlayed = { playedSongsHistory.add(it) },
             initialPlayer = null
         )
         val songs = listOf(sampleSong(1L), sampleSong(2L), sampleSong(3L))
@@ -146,8 +142,6 @@ class PlaybackServiceTest {
         assertEquals(3, harness.mediaItems.size)
         assertEquals(1, harness.currentMediaItemIndex)
         assertTrue(harness.isPlaying)
-        assertEquals(1, playedSongsHistory.size)
-        assertEquals(2L, playedSongsHistory.first().id)
 
         disconnectedController.release()
     }
@@ -161,7 +155,6 @@ class PlaybackServiceTest {
         assertEquals(3, controller.uiState.value.queue.size)
         assertEquals(10L, controller.uiState.value.currentSong?.id)
         assertTrue(fakePlayer.isPlaying)
-        assertEquals(listOf(10L), playedSongsHistory.map { it.id })
 
         // Toggle pause and resume
         controller.togglePlayPause()
@@ -309,7 +302,6 @@ class PlaybackServiceTest {
         val session1Controller = MusicPlayerController(
             context = context,
             scope = testScope,
-            onSongPlayed = { playedSongsHistory.add(it) },
             initialPlayer = session1Player.playerProxy,
             playbackStateRepository = repo
         )
@@ -389,7 +381,6 @@ class PlaybackServiceTest {
         val ctrl1 = MusicPlayerController(
             context = context,
             scope = testScope,
-            onSongPlayed = { playedSongsHistory.add(it) },
             initialPlayer = player1.playerProxy,
             playbackStateRepository = repo
         )
@@ -420,7 +411,6 @@ class PlaybackServiceTest {
         val ctrl3 = MusicPlayerController(
             context = context,
             scope = testScope,
-            onSongPlayed = { playedSongsHistory.add(it) },
             initialPlayer = player3.playerProxy,
             playbackStateRepository = repo
         )
@@ -448,8 +438,6 @@ class PlaybackServiceTest {
         assertEquals(1, ctrl4.uiState.value.currentIndex)
         assertEquals(55_000L, ctrl4.uiState.value.positionMs)
         assertEquals("0:55", ctrl4.uiState.value.formattedPosition)
-        // Verify Recently Played recorded both tracks
-        assertTrue(playedSongsHistory.map { it.id }.containsAll(listOf(201L, 202L)))
 
         ctrl4.release()
         db.close()

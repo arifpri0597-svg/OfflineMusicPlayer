@@ -7,7 +7,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.PulseMusicApp
 import com.example.data.local.FavoriteEntity
-import com.example.data.local.HistoryEntity
 import com.example.data.local.PlaylistEntity
 import com.example.data.local.PlaylistSongCrossRef
 import com.example.data.model.Album
@@ -40,7 +39,6 @@ enum class NavigationTab {
     ARTISTS,
     FOLDERS,
     FAVORITES,
-    HISTORY,
     SETTINGS
 }
 
@@ -56,7 +54,6 @@ data class LibraryUiState(
     val selectedPlaylistSongs: List<Song> = emptyList(),
     val songForAddToPlaylist: Song? = null,
     val favoriteIds: Set<Long> = emptySet(),
-    val historyItems: List<HistoryEntity> = emptyList(),
     val searchQuery: String = "",
     val sortOrder: SortOrder = SortOrder.TITLE_ASC,
     val selectedTab: NavigationTab = NavigationTab.HOME,
@@ -83,9 +80,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val playerController: MusicPlayerController = MusicPlayerController(
         context = application,
         scope = viewModelScope,
-        onSongPlayed = { song ->
-            recordSongHistory(song)
-        },
         playbackStateRepository = playbackStateRepository
     )
 
@@ -102,7 +96,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     init {
         restoreLastPlaybackState()
         observeSongsFromDatabase()
-        observeFavoritesAndHistory()
+        observeFavorites()
         observePlaylists()
         observePreferences()
     }
@@ -151,7 +145,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun observeFavoritesAndHistory() {
+    private fun observeFavorites() {
         viewModelScope.launch {
             musicDao.getAllFavoriteIds()
                 .distinctUntilChanged()
@@ -159,14 +153,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .flowOn(Dispatchers.Default)
                 .collect { favSet ->
                     _libraryState.update { it.copy(favoriteIds = favSet) }
-                }
-        }
-        viewModelScope.launch {
-            musicDao.getHistory()
-                .distinctUntilChanged()
-                .flowOn(Dispatchers.Default)
-                .collect { historyList ->
-                    _libraryState.update { it.copy(historyItems = historyList) }
                 }
         }
     }
@@ -377,12 +363,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun clearHistory() {
-        viewModelScope.launch(Dispatchers.IO) {
-            musicDao.clearHistory()
-        }
-    }
-
     fun setThemeMode(mode: String) {
         viewModelScope.launch {
             userPrefs.setThemeMode(mode)
@@ -400,18 +380,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _libraryState.update { it.copy(pauseOnHeadsetUnplug = enabled) }
         viewModelScope.launch {
             userPrefs.setPauseOnHeadsetUnplug(enabled)
-        }
-    }
-
-    private fun recordSongHistory(song: Song) {
-        viewModelScope.launch(Dispatchers.IO) {
-            musicDao.insertHistory(
-                HistoryEntity(
-                    songId = song.id,
-                    title = song.title,
-                    artist = song.artist
-                )
-            )
         }
     }
 

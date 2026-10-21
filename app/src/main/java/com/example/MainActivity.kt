@@ -34,7 +34,6 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
@@ -66,7 +65,6 @@ import com.example.ui.screens.AlbumsScreen
 import com.example.ui.screens.ArtistsScreen
 import com.example.ui.screens.FavoritesScreen
 import com.example.ui.screens.FoldersScreen
-import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.NowPlayingScreen
 import com.example.ui.screens.PermissionView
@@ -321,17 +319,6 @@ fun PulseMusicAppRoot(
         libraryState.songs.filter { libraryState.favoriteIds.contains(it.id) }
     }
 
-    val recentSongs = remember(libraryState.songs, libraryState.historyItems) {
-        val songMap = libraryState.songs.associateBy { it.id }
-        libraryState.historyItems.mapNotNull { historyItem ->
-            songMap[historyItem.songId]
-                ?: libraryState.songs.firstOrNull {
-                    it.title.equals(historyItem.title, ignoreCase = true) &&
-                        it.artist.equals(historyItem.artist, ignoreCase = true)
-                }
-        }.distinctBy { it.id }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
@@ -413,7 +400,6 @@ fun PulseMusicAppRoot(
                                 songs = libraryState.songs,
                                 albums = libraryState.albums,
                                 favoriteSongs = favoriteSongs,
-                                recentSongs = recentSongs,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
@@ -432,7 +418,6 @@ fun PulseMusicAppRoot(
                                 onNavigateToPlaylists = { viewModel.setNavigationTab(NavigationTab.PLAYLISTS) },
                                 onNavigateToFavorites = { viewModel.setNavigationTab(NavigationTab.FAVORITES) },
                                 onNavigateToArtists = { viewModel.setNavigationTab(NavigationTab.ARTISTS) },
-                                onNavigateToHistory = { viewModel.setNavigationTab(NavigationTab.HISTORY) },
                                 onNavigateToSettings = { viewModel.setNavigationTab(NavigationTab.SETTINGS) },
                                 playlistCount = libraryState.playlists.size,
                                 artistCount = libraryState.artists.size
@@ -553,26 +538,10 @@ fun PulseMusicAppRoot(
                             )
                         }
 
-                        NavigationTab.HISTORY -> {
-                            HistoryScreen(
-                                recentSongs = recentSongs,
-                                currentSongId = currentSongId,
-                                isPlaying = isPlaying,
-                                favoriteIds = libraryState.favoriteIds,
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onClearHistory = { viewModel.clearHistory() },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) }
-                            )
-                        }
-
                         NavigationTab.SETTINGS -> {
                             SettingsScreen(
                                 currentTheme = libraryState.userThemePreference,
                                 onThemeChange = { viewModel.setThemeMode(it) },
-                                onClearHistory = { viewModel.clearHistory() },
                                 onClearFavorites = { viewModel.clearFavorites() },
                                 resumeLastPlayback = libraryState.resumeLastPlayback,
                                 onResumeLastChange = { viewModel.setResumeLastPlayback(it) },
