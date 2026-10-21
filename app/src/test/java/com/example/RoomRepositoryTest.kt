@@ -474,9 +474,10 @@ class RoomRepositoryTest {
     }
 
     @Test
-    fun `database MIGRATION_3_4 safely creates playback_state table without losing existing data`() = runBlocking {
+    fun `database MIGRATION_3_4 and MIGRATION_4_5 safely create and upgrade playback_state table without losing existing data`() = runBlocking {
         val supportDb = database.openHelper.writableDatabase
         PulseDatabase.MIGRATION_3_4.migrate(supportDb)
+        PulseDatabase.MIGRATION_4_5.migrate(supportDb)
 
         val entity = com.example.data.local.PlaybackStateEntity(
             songId = 77L,
@@ -484,13 +485,16 @@ class RoomRepositoryTest {
             title = "Migrated Song",
             artist = "Migrated Artist",
             positionMs = 42_000L,
-            durationMs = 180_000L
+            durationMs = 180_000L,
+            playbackSpeed = 1.25f,
+            isExternal = false
         )
         musicDao.upsertPlaybackState(entity)
         val loaded = musicDao.getPlaybackState()
         assertNotNull(loaded)
         assertEquals(77L, loaded?.songId)
         assertEquals(42_000L, loaded?.positionMs)
+        assertEquals(1.25f, loaded?.playbackSpeed ?: 1.0f, 0.001f)
     }
 
     class FakeMediaStoreProvider : ContentProvider() {

@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistSongCrossRef::class,
         PlaybackStateEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class PulseDatabase : RoomDatabase() {
@@ -45,11 +45,26 @@ abstract class PulseDatabase : RoomDatabase() {
                         `isPlaying` INTEGER NOT NULL,
                         `shuffleEnabled` INTEGER NOT NULL,
                         `repeatMode` TEXT NOT NULL,
+                        `playbackSpeed` REAL NOT NULL DEFAULT 1.0,
+                        `isExternal` INTEGER NOT NULL DEFAULT 0,
                         `lastUpdated` INTEGER NOT NULL,
                         PRIMARY KEY(`id`)
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                try {
+                    db.execSQL("ALTER TABLE `playback_state` ADD COLUMN `playbackSpeed` REAL NOT NULL DEFAULT 1.0")
+                } catch (_: Exception) {
+                }
+                try {
+                    db.execSQL("ALTER TABLE `playback_state` ADD COLUMN `isExternal` INTEGER NOT NULL DEFAULT 0")
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -61,7 +76,7 @@ abstract class PulseDatabase : RoomDatabase() {
                     "pulse_music_database.db"
                 )
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                    .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration(true)
                     .build()
                 INSTANCE = instance

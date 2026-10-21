@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -154,6 +156,7 @@ fun NowPlayingScreen(
     onAddToPlaylist: (Song) -> Unit = {},
     onRemoveFromQueue: (Int) -> Unit,
     onJumpToQueueItem: (Int) -> Unit,
+    onPlaybackSpeedChange: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     BackHandler {
@@ -161,6 +164,7 @@ fun NowPlayingScreen(
     }
 
     var showQueueSheet by remember { mutableStateOf(false) }
+    var showPlaybackSpeedSheet by remember { mutableStateOf(false) }
     var showTrackDetailsDialog by remember { mutableStateOf(false) }
     val song = playerState.currentSong ?: return
 
@@ -174,6 +178,7 @@ fun NowPlayingScreen(
     )
 
     val onOpenQueue = remember { { showQueueSheet = true } }
+    val onOpenPlaybackSpeed = remember { { showPlaybackSpeedSheet = true } }
     val onShowTrackInfo = remember { { showTrackDetailsDialog = true } }
     val onRewind10s = remember(onSeekRelative) { { onSeekRelative(-10_000L) } }
     val onForward10s = remember(onSeekRelative) { { onSeekRelative(10_000L) } }
@@ -240,8 +245,10 @@ fun NowPlayingScreen(
             NowPlayingActionBar(
                 isFavorite = isFavorite,
                 queueSize = playerState.queue.size,
+                formattedPlaybackSpeed = playerState.formattedPlaybackSpeed,
                 onToggleFavorite = onToggleFavorite,
                 onAddToPlaylist = onAddCurrentToPlaylist,
+                onOpenPlaybackSpeed = onOpenPlaybackSpeed,
                 onOpenQueue = onOpenQueue,
                 onRewind10s = onRewind10s,
                 onForward10s = onForward10s,
@@ -413,6 +420,203 @@ fun NowPlayingScreen(
                 }
             }
         }
+
+        // Premium Playback Speed Modal Bottom Sheet
+        if (showPlaybackSpeedSheet) {
+            val speedSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = { showPlaybackSpeedSheet = false },
+                sheetState = speedSheetState,
+                containerColor = Color(0xFF140826),
+                modifier = Modifier.testTag("playback_speed_bottom_sheet")
+            ) {
+                PlaybackSpeedBottomSheetContent(
+                    currentSpeed = playerState.playbackSpeed,
+                    onSelectSpeed = { selectedSpeed ->
+                        onPlaybackSpeedChange(selectedSpeed)
+                    },
+                    onDismiss = { showPlaybackSpeedSheet = false }
+                )
+            }
+        }
+    }
+}
+
+private data class SpeedPresetItem(
+    val speed: Float,
+    val label: String,
+    val subtitle: String,
+    val testTag: String
+)
+
+private val PLAYBACK_SPEED_PRESETS = listOf(
+    SpeedPresetItem(0.5f, "0.5×", "Slowest", "speed_option_0_5x"),
+    SpeedPresetItem(0.75f, "0.75×", "Slower", "speed_option_0_75x"),
+    SpeedPresetItem(1.0f, "1×", "Normal", "speed_option_1x"),
+    SpeedPresetItem(1.25f, "1.25×", "Slightly Faster", "speed_option_1_25x"),
+    SpeedPresetItem(1.5f, "1.5×", "Fast", "speed_option_1_5x"),
+    SpeedPresetItem(1.75f, "1.75×", "Very Fast", "speed_option_1_75x"),
+    SpeedPresetItem(2.0f, "2×", "Double Speed", "speed_option_2x")
+)
+
+@Composable
+private fun PlaybackSpeedBottomSheetContent(
+    currentSpeed: Float,
+    onSelectSpeed: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = NeonPink.copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.45f)),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = NeonPinkLight,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "Playback Speed",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Current: ${PlayerUiState.formatSpeed(currentSpeed)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NeonPinkLight
+                    )
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (kotlin.math.abs(currentSpeed - 1.0f) >= 0.01f) {
+                    Surface(
+                        modifier = Modifier
+                            .clip(PillShape)
+                            .clickable { onSelectSpeed(1.0f) }
+                            .testTag("speed_reset_btn"),
+                        shape = PillShape,
+                        color = Color(0xFF24113B),
+                        border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = "Reset",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = NeonPinkLight,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close playback speed",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            for (preset in PLAYBACK_SPEED_PRESETS) {
+                val isSelected = kotlin.math.abs(currentSpeed - preset.speed) < 0.01f
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable {
+                            onSelectSpeed(preset.speed)
+                            onDismiss()
+                        }
+                        .testTag(preset.testTag),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) {
+                        NeonPink.copy(alpha = 0.20f)
+                    } else {
+                        Color(0xFF211038).copy(alpha = 0.72f)
+                    },
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) NeonPink else NeonPurple.copy(alpha = 0.28f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = preset.label,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) NeonPinkLight else Color.White,
+                                modifier = Modifier.width(56.dp)
+                            )
+                            Text(
+                                text = preset.subtitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (isSelected) {
+                            Surface(
+                                shape = CircleShape,
+                                color = NeonPink,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected speed",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 
@@ -598,8 +802,10 @@ private fun NowPlayingTrackMetadata(
 private fun NowPlayingActionBar(
     isFavorite: Boolean,
     queueSize: Int,
+    formattedPlaybackSpeed: String,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onOpenPlaybackSpeed: () -> Unit,
     onOpenQueue: () -> Unit,
     onRewind10s: () -> Unit,
     onForward10s: () -> Unit,
@@ -714,6 +920,15 @@ private fun NowPlayingActionBar(
                 expanded = moreMenuExpanded,
                 onDismissRequest = { moreMenuExpanded = false }
             ) {
+                DropdownMenuItem(
+                    text = { Text("Playback Speed ($formattedPlaybackSpeed)") },
+                    leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, tint = NeonPink) },
+                    onClick = {
+                        moreMenuExpanded = false
+                        onOpenPlaybackSpeed()
+                    },
+                    modifier = Modifier.testTag("now_playing_speed_menu_item")
+                )
                 DropdownMenuItem(
                     text = { Text("Playback Queue ($queueSize)") },
                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = NeonPurple) },

@@ -503,6 +503,169 @@ class PlaybackServiceTest {
         Unit
     }
 
+    @Test
+    fun `playbackSpeed updates player parameters formats labels and persists across restarts`(): Unit = kotlinx.coroutines.runBlocking {
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(context, com.example.data.local.PulseDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val dao = db.musicDao()
+        val repo = com.example.data.repository.PlaybackStateRepository(context, dao)
+        repo.clearPlaybackState()
+
+        val song = sampleSong(301L, "Velocity Track", durationMs = 200_000L)
+        dao.insertSongs(listOf(com.example.data.local.SongEntity.fromDomainSong(song)))
+
+        val player1 = FakePlayerHarness().apply { duration = 200_000L }
+        val ctrl1 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player1.playerProxy,
+            playbackStateRepository = repo
+        )
+
+        ctrl1.playQueue(listOf(song), startIndex = 0)
+        player1.currentPosition = 42_000L
+
+        val expectedSpeeds = listOf(
+            0.5f to "0.5×",
+            0.75f to "0.75×",
+            1.0f to "1×",
+            1.25f to "1.25×",
+            1.5f to "1.5×",
+            1.75f to "1.75×",
+            2.0f to "2×"
+        )
+        for ((speed, expectedLabel) in expectedSpeeds) {
+            ctrl1.setPlaybackSpeed(speed)
+            assertEquals(speed, ctrl1.uiState.value.playbackSpeed, 0.001f)
+            assertEquals(speed, player1.playbackSpeed, 0.001f)
+            assertEquals(expectedLabel, ctrl1.uiState.value.formattedPlaybackSpeed)
+        }
+
+        // Set to 1.5x, pause at 0:42, and exit
+        ctrl1.setPlaybackSpeed(1.5f)
+        ctrl1.togglePlayPause()
+        ctrl1.release()
+
+        // Reopen app and verify both 0:42 position and 1.5x speed restore
+        val player2 = FakePlayerHarness().apply { duration = 200_000L }
+        val ctrl2 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player2.playerProxy,
+            playbackStateRepository = repo
+        )
+        assertTrue(ctrl2.restorePlaybackState(listOf(song)))
+        assertEquals(42_000L, ctrl2.uiState.value.positionMs)
+        assertEquals(1.5f, ctrl2.uiState.value.playbackSpeed, 0.001f)
+        assertEquals("1.5×", ctrl2.uiState.value.formattedPlaybackSpeed)
+        assertEquals(1.5f, player2.playbackSpeed, 0.001f)
+
+        ctrl2.release()
+        db.close()
+    }
+
+    @Test
+    fun `external File Manager audio URI never triggers Source error on startup reopen or after file deletion`(): Unit = kotlinx.coroutines.runBlocking {
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(context, com.example.data.local.PulseDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val dao = db.musicDao()
+        val repo = com.example.data.repository.PlaybackStateRepository(context, dao)
+        repo.clearPlaybackState()
+
+        // Create a real temporary audio file to simulate an accessible File Manager track
+        val tempAudioFile = java.io.File.createTempFile("puretune_external_", ".mp3", context.cacheDir).apply {
+            writeBytes(ByteArray(128) { 0x42 })
+        }
+        val externalUri = Uri.fromFile(tempAudioFile)
+        val externalSong = Song(
+            id = externalUri.toString().hashCode().toLong(),
+            title = "External Track",
+            artist = "File Manager Artist",
+            album = "External Audio",
+            durationMs = 160_000L,
+            contentUri = externalUri,
+            albumArtUri = null,
+            folderName = "External",
+            path = tempAudioFile.absolutePath
+        )
+
+        val player1 = FakePlayerHarness().apply { duration = 160_000L }
+        val ctrl1 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player1.playerProxy,
+            playbackStateRepository = repo
+        )
+
+        // Scenario A & B (Accessible external file): Play -> pause at 0:42 -> exit/remove from Recent Apps -> reopen
+        ctrl1.notifyExternalIntentPending()
+        ctrl1.playQueue(listOf(externalSong), startIndex = 0)
+        player1.currentPosition = 42_000L
+        ctrl1.togglePlayPause()
+        ctrl1.release()
+
+        val player2 = FakePlayerHarness().apply { duration = 160_000L }
+        val ctrl2 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player2.playerProxy,
+            playbackStateRepository = repo
+        )
+        assertTrue("Accessible external file must restore its saved position", ctrl2.restorePlaybackState(emptyList()))
+        assertEquals(42_000L, ctrl2.uiState.value.positionMs)
+        assertNull("No Source error may appear on startup restoration", ctrl2.uiState.value.errorMessage)
+
+        // Even if ExoPlayer emits a background Source error while in restored paused state, it must NEVER show "Source error"
+        player2.notifyPlayerError(
+            PlaybackException("Source error", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED)
+        )
+        assertNull("Background error during startup restoration must be suppressed", ctrl2.uiState.value.errorMessage)
+        ctrl2.release()
+
+        // Scenario D (Deleted / inaccessible external file): Delete file -> reopen app -> no Source error, state cleared
+        repo.savePlaybackState(
+            song = externalSong,
+            positionMs = 42_000L,
+            durationMs = 160_000L,
+            isPlaying = false,
+            isExternal = true
+        )
+        tempAudioFile.delete()
+
+        val player3 = FakePlayerHarness()
+        val ctrl3 = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = player3.playerProxy,
+            playbackStateRepository = repo
+        )
+        val restoredDeleted = ctrl3.restorePlaybackState(emptyList())
+        assertFalse("Deleted/inaccessible external file must not be restored on startup", restoredDeleted)
+        assertNull("No Source error may appear when external file was deleted", ctrl3.uiState.value.errorMessage)
+        assertNull("Invalid external playback state must be cleared", repo.getLastPlaybackState())
+
+        // Also test an inaccessible content:// URI from File Manager (e.g. revoked permission)
+        val revokedContentState = com.example.data.local.PlaybackStateEntity(
+            songId = 99999L,
+            contentUriString = "content://com.external.filemanager.provider/document/music.mp3",
+            title = "Revoked Track",
+            artist = "Unknown",
+            positionMs = 35_000L,
+            durationMs = 180_000L,
+            isExternal = true
+        )
+        repo.savePlaybackState(revokedContentState)
+        val restoredRevoked = ctrl3.restorePlaybackState(emptyList())
+        assertFalse("Inaccessible content:// external URI must not be restored", restoredRevoked)
+        assertNull("No Source error may appear for revoked external content:// URI", ctrl3.uiState.value.errorMessage)
+        assertNull("Revoked external URI state must be cleared", repo.getLastPlaybackState())
+
+        ctrl3.release()
+        db.close()
+    }
+
     private class FakePlayerHarness {
         val listeners = mutableListOf<Player.Listener>()
         val mediaItems = mutableListOf<MediaItem>()
@@ -513,6 +676,7 @@ class PlaybackServiceTest {
         var playbackState: Int = Player.STATE_READY
         var shuffleModeEnabled: Boolean = false
         var repeatMode: Int = Player.REPEAT_MODE_OFF
+        var playbackSpeed: Float = 1.0f
 
         fun notifyPlayerError(error: PlaybackException) {
             listeners.toList().forEach { it.onPlayerError(error) }
@@ -542,6 +706,17 @@ class PlaybackServiceTest {
                     currentPosition = if (args.size >= 3 && args[2] is Long) args[2] as Long else 0L
                     Unit
                 }
+                "clearMediaItems" -> {
+                    mediaItems.clear()
+                    currentMediaItemIndex = 0
+                    currentPosition = 0L
+                    Unit
+                }
+                "getMediaItemAt" -> {
+                    val idx = args[0] as Int
+                    mediaItems.getOrNull(idx) ?: MediaItem.EMPTY
+                }
+                "getCurrentMediaItem" -> mediaItems.getOrNull(currentMediaItemIndex)
                 "prepare" -> {
                     playbackState = Player.STATE_READY
                     listeners.toList().forEach { it.onPlaybackStateChanged(playbackState) }
@@ -565,6 +740,13 @@ class PlaybackServiceTest {
                 "getDuration" -> duration
                 "hasNextMediaItem" -> currentMediaItemIndex + 1 < mediaItems.size
                 "hasPreviousMediaItem" -> currentMediaItemIndex > 0
+                "setPlaybackSpeed" -> {
+                    playbackSpeed = args[0] as Float
+                    val params = androidx.media3.common.PlaybackParameters(playbackSpeed)
+                    listeners.toList().forEach { it.onPlaybackParametersChanged(params) }
+                    Unit
+                }
+                "getPlaybackParameters" -> androidx.media3.common.PlaybackParameters(playbackSpeed)
                 "seekToNextMediaItem" -> {
                     if (currentMediaItemIndex + 1 < mediaItems.size) {
                         currentMediaItemIndex++

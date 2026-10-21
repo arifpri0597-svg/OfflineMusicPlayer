@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import com.example.data.local.MusicDao
 import com.example.data.local.PlaybackStateEntity
@@ -23,7 +24,9 @@ data class RestoredPlaybackSession(
     val positionMs: Long,
     val durationMs: Long,
     val shuffleEnabled: Boolean,
-    val repeatMode: RepeatMode
+    val repeatMode: RepeatMode,
+    val playbackSpeed: Float = 1.0f,
+    val isExternal: Boolean = false
 )
 
 /**
@@ -65,10 +68,13 @@ class PlaybackStateRepository(
         isPlaying: Boolean = false,
         shuffleEnabled: Boolean = false,
         repeatMode: RepeatMode = RepeatMode.OFF,
+        playbackSpeed: Float = 1.0f,
+        isExternal: Boolean = isExternalUriString(song.contentUri.toString()) || song.folderName == "External",
         lastUpdated: Long = System.currentTimeMillis()
     ) {
         val effectiveDuration = if (durationMs > 0L) durationMs else max(0L, song.durationMs)
         val clampedPosition = clampPosition(positionMs, effectiveDuration)
+        val clampedSpeed = clampSpeed(playbackSpeed)
         val entity = PlaybackStateEntity(
             id = PlaybackStateEntity.SINGLETON_ID,
             songId = song.id,
@@ -84,6 +90,8 @@ class PlaybackStateRepository(
             isPlaying = isPlaying,
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode.name,
+            playbackSpeed = clampedSpeed,
+            isExternal = isExternal,
             lastUpdated = lastUpdated
         )
         savePlaybackState(entity)
@@ -165,8 +173,11 @@ class PlaybackStateRepository(
     /**
      * Resolves the persisted [PlaybackStateEntity] against the current library (or cached Room songs),
      * handling edge cases safely:
-     * - Deleted audio file
-     * - Moved or renamed audio file (matches by ID, then URI, then Title + Artist)
+     * - External File Manager URIs: strictly verified for accessibility and audio validity BEFORE
+     *   restoration (both when librarySongs is empty and non-empty). If invalid, deleted, moved,
+     *   or inaccessible, silently ignored and cleared without affecting library/history data.
+     * - Deleted MediaStore audio file
+     * - Moved or renamed MediaStore audio file (matches by ID, then URI, then Title + Artist)
      * - Invalid media URI
      * - Changed track duration
      * - Saved position > duration or < 0 (clamped to 0..actualDuration)
@@ -181,14 +192,56 @@ class PlaybackStateRepository(
             return@withContext null
         }
 
-        val favIds = try {
-            // Best-effort favorite lookup if needed
-            emptySet<Long>()
+        val savedUri = try {
+            Uri.parse(validState.contentUriString)
         } catch (_: Exception) {
-            emptySet()
+            clearPlaybackState()
+            return@withContext null
         }
 
-        // 1. Resolve song from librarySongs if available
+        val isExternalState = validState.isExternal || isExternalUriString(validState.contentUriString)
+
+        // Strict verification for external File Manager URIs BEFORE attempting startup restoration
+        if (isExternalState) {
+            if (!isExternalAudioUriValidAndAccessible(
+                    uri = savedUri,
+                    explicitMimeType = null,
+                    fallbackTitle = validState.title
+                )
+            ) {
+                // Silently ignore and clear only the invalid/inaccessible external playback state
+                clearPlaybackState()
+                return@withContext null
+            }
+
+            val externalSong = validState.toFallbackSong()
+            if (externalSong == null) {
+                clearPlaybackState()
+                return@withContext null
+            }
+
+            val actualDuration = max(0L, validState.durationMs.coerceAtLeast(externalSong.durationMs))
+            val clampedPosition = clampPosition(validState.positionMs, actualDuration)
+            val repeatMode = try {
+                RepeatMode.valueOf(validState.repeatMode)
+            } catch (_: Exception) {
+                RepeatMode.OFF
+            }
+
+            return@withContext RestoredPlaybackSession(
+                currentSong = externalSong.copy(durationMs = actualDuration),
+                queue = listOf(externalSong.copy(durationMs = actualDuration)),
+                currentIndex = 0,
+                positionMs = clampedPosition,
+                durationMs = actualDuration,
+                shuffleEnabled = validState.shuffleEnabled,
+                repeatMode = repeatMode,
+                playbackSpeed = clampSpeed(validState.playbackSpeed),
+                isExternal = true
+            )
+        }
+
+        // Standard MediaStore song resolution
         var matchedSong: Song? = null
         if (librarySongs.isNotEmpty()) {
             matchedSong = librarySongs.firstOrNull { it.id == validState.songId }
@@ -200,15 +253,10 @@ class PlaybackStateRepository(
                     }
                 } else null
 
-            // If library is populated and the track wasn't found in the scanned library,
-            // check whether it was an external file that still exists; otherwise it was deleted.
             if (matchedSong == null) {
-                if (isExternalUriStillAccessible(validState.contentUriString)) {
-                    matchedSong = validState.toFallbackSong()
-                } else {
-                    clearPlaybackState()
-                    return@withContext null
-                }
+                // Song was deleted from MediaStore
+                clearPlaybackState()
+                return@withContext null
             }
         } else {
             // Library list hasn't been loaded into memory yet; check Room cached songs table first
@@ -218,7 +266,7 @@ class PlaybackStateRepository(
                 null
             }
             if (cachedEntity != null) {
-                val domainSong = cachedEntity.toDomainSong(isFavorite = favIds.contains(cachedEntity.id))
+                val domainSong = cachedEntity.toDomainSong(isFavorite = false)
                 if (isSongFileValid(domainSong)) {
                     matchedSong = domainSong
                 } else {
@@ -250,11 +298,15 @@ class PlaybackStateRepository(
         }
         val clampedPosition = clampPosition(validState.positionMs, actualDuration)
 
-        // Reconstruct queue
+        // Reconstruct queue without duplicates or invalid items
         val queueIds = validState.parseQueueSongIds()
         val restoredQueue = if (librarySongs.isNotEmpty() && queueIds.isNotEmpty()) {
             val songById = librarySongs.associateBy { it.id }
-            val list = queueIds.mapNotNull { songById[it] }.toMutableList()
+            val list = queueIds
+                .distinct()
+                .mapNotNull { songById[it] }
+                .filter { isSongFileValid(it) }
+                .toMutableList()
             if (list.none { it.id == resolvedSong.id }) {
                 val insertIdx = validState.currentIndex.coerceIn(0, list.size)
                 list.add(insertIdx, resolvedSong)
@@ -280,8 +332,111 @@ class PlaybackStateRepository(
             positionMs = clampedPosition,
             durationMs = actualDuration,
             shuffleEnabled = validState.shuffleEnabled,
-            repeatMode = repeatMode
+            repeatMode = repeatMode,
+            playbackSpeed = clampSpeed(validState.playbackSpeed),
+            isExternal = false
         )
+    }
+
+    /**
+     * Verifies that an external File Manager URI:
+     * 1. Has a valid `content` or `file` scheme (and is not inside private app directories).
+     * 2. Is currently accessible (can be opened for reading without SecurityException/FileNotFoundException).
+     * 3. Is a valid audio file (by MIME type, audio extension, or audio metadata).
+     */
+    fun isExternalAudioUriValidAndAccessible(
+        uri: Uri,
+        explicitMimeType: String? = null,
+        fallbackTitle: String? = null
+    ): Boolean {
+        val uriString = uri.toString()
+        if (uriString.isBlank()) return false
+        val scheme = uri.scheme?.lowercase() ?: return false
+        if (scheme != "content" && scheme != "file") return false
+
+        if (scheme == "file") {
+            val rawPath = uri.path ?: return false
+            val file = File(rawPath)
+            if (!file.exists() || !file.isFile || !file.canRead()) {
+                return false
+            }
+            val canonicalPath = try {
+                file.canonicalPath
+            } catch (_: Exception) {
+                return false
+            }
+            val privateDataDir = context.applicationInfo?.dataDir?.let {
+                try { File(it).canonicalPath } catch (_: Exception) { null }
+            }
+            if (privateDataDir != null && canonicalPath.startsWith(privateDataDir)) {
+                val cacheDirPath = try { context.cacheDir?.canonicalPath } catch (_: Exception) { null }
+                val isInsideCache = cacheDirPath != null && canonicalPath.startsWith(cacheDirPath)
+                if (!isInsideCache) {
+                    return false
+                }
+            }
+            if (explicitMimeType != null && !isSupportedAudioMimeType(explicitMimeType)) {
+                return false
+            }
+            return hasSupportedAudioExtension(file.name) ||
+                hasSupportedAudioExtension(fallbackTitle) ||
+                isSupportedAudioMimeType(explicitMimeType) ||
+                hasAudioTrackMetadata(uri)
+        }
+
+        // scheme == "content"
+        val isReadable = try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                afd.length != 0L
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
+        if (!isReadable) return false
+
+        val resolvedMimeType = explicitMimeType?.takeIf { it.isNotBlank() }
+            ?: try {
+                context.contentResolver.getType(uri)
+            } catch (_: Exception) {
+                null
+            }
+
+        if (resolvedMimeType != null) {
+            if (isSupportedAudioMimeType(resolvedMimeType)) {
+                return true
+            }
+            // If the provider returned a generic binary MIME type, verify via extension or metadata
+            if (!resolvedMimeType.equals("application/octet-stream", ignoreCase = true)) {
+                return false
+            }
+        }
+
+        return hasSupportedAudioExtension(uri.lastPathSegment) ||
+            hasSupportedAudioExtension(fallbackTitle) ||
+            hasSupportedAudioExtension(uriString) ||
+            hasAudioTrackMetadata(uri)
+    }
+
+    private fun hasAudioTrackMetadata(uri: Uri): Boolean {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (uri.scheme?.lowercase() == "file" && uri.path != null) {
+                retriever.setDataSource(uri.path)
+            } else {
+                retriever.setDataSource(context, uri)
+            }
+            val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val mime = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+            hasAudio != null || duration > 0L || isSupportedAudioMimeType(mime)
+        } catch (_: Exception) {
+            false
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun isSongFileValid(song: Song): Boolean {
@@ -299,43 +454,16 @@ class PlaybackStateRepository(
         if (scheme == "file") {
             val filePath = uri.path ?: return false
             val file = File(filePath)
-            if (!file.exists()) return false
+            if (!file.exists() || !file.canRead()) return false
         }
-        if (song.path.isNotBlank() && song.path.startsWith("/")) {
+        if (scheme == "file" && song.path.isNotBlank() && song.path.startsWith("/")) {
             val diskFile = File(song.path)
-            // Only fail if parent directory exists on real filesystem and the specific file was deleted
             val parent = diskFile.parentFile
             if (parent != null && parent.exists() && !diskFile.exists()) {
                 return false
             }
         }
         return true
-    }
-
-    private fun isExternalUriStillAccessible(uriString: String): Boolean {
-        if (uriString.isBlank()) return false
-        val uri = try {
-            Uri.parse(uriString)
-        } catch (_: Exception) {
-            return false
-        }
-        val scheme = uri.scheme?.lowercase() ?: return false
-        if (scheme == "file") {
-            val path = uri.path ?: return false
-            return File(path).exists()
-        }
-        if (scheme == "content") {
-            // MediaStore audio URIs that disappeared from a non-empty MediaStore scan were deleted
-            if (uriString.startsWith("content://media/")) {
-                return false
-            }
-            return try {
-                context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
-            } catch (_: Exception) {
-                false
-            }
-        }
-        return false
     }
 
     private fun sanitizeState(state: PlaybackStateEntity): PlaybackStateEntity? {
@@ -357,12 +485,16 @@ class PlaybackStateRepository(
         } catch (_: Exception) {
             RepeatMode.OFF.name
         }
+        val safeSpeed = clampSpeed(state.playbackSpeed)
+        val isExternal = state.isExternal || isExternalUriString(state.contentUriString)
         return state.copy(
             id = PlaybackStateEntity.SINGLETON_ID,
             positionMs = safePosition,
             durationMs = safeDuration,
             currentIndex = safeIndex,
-            repeatMode = safeRepeat
+            repeatMode = safeRepeat,
+            playbackSpeed = safeSpeed,
+            isExternal = isExternal
         )
     }
 
@@ -383,6 +515,8 @@ class PlaybackStateRepository(
                 .putBoolean(KEY_IS_PLAYING, state.isPlaying)
                 .putBoolean(KEY_SHUFFLE, state.shuffleEnabled)
                 .putString(KEY_REPEAT_MODE, state.repeatMode)
+                .putFloat(KEY_PLAYBACK_SPEED, state.playbackSpeed)
+                .putBoolean(KEY_IS_EXTERNAL, state.isExternal)
                 .putLong(KEY_LAST_UPDATED, state.lastUpdated)
             if (commitSynchronously) {
                 editor.commit()
@@ -414,6 +548,8 @@ class PlaybackStateRepository(
                 isPlaying = syncPrefs.getBoolean(KEY_IS_PLAYING, false),
                 shuffleEnabled = syncPrefs.getBoolean(KEY_SHUFFLE, false),
                 repeatMode = syncPrefs.getString(KEY_REPEAT_MODE, RepeatMode.OFF.name) ?: RepeatMode.OFF.name,
+                playbackSpeed = clampSpeed(syncPrefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)),
+                isExternal = syncPrefs.getBoolean(KEY_IS_EXTERNAL, isExternalUriString(uriStr)),
                 lastUpdated = syncPrefs.getLong(KEY_LAST_UPDATED, 0L)
             )
         } catch (_: Exception) {
@@ -444,7 +580,45 @@ class PlaybackStateRepository(
         private const val KEY_IS_PLAYING = "is_playing"
         private const val KEY_SHUFFLE = "shuffle"
         private const val KEY_REPEAT_MODE = "repeat_mode"
+        private const val KEY_PLAYBACK_SPEED = "playback_speed"
+        private const val KEY_IS_EXTERNAL = "is_external"
         private const val KEY_LAST_UPDATED = "last_updated"
+
+        private val SUPPORTED_AUDIO_EXTENSIONS = setOf(
+            "mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "webm", "3gp", "amr", "mid", "xmf", "mxmf", "ota"
+        )
+
+        fun isExternalUriString(uriString: String): Boolean {
+            if (uriString.isBlank()) return false
+            val lower = uriString.lowercase()
+            if (lower.startsWith("content://media/") || lower.startsWith("android.resource://")) {
+                return false
+            }
+            return lower.startsWith("content://") || lower.startsWith("file://")
+        }
+
+        fun isSupportedAudioMimeType(mimeType: String?): Boolean {
+            if (mimeType.isNullOrBlank()) return false
+            val normalized = mimeType.lowercase().trim()
+            return normalized.startsWith("audio/") ||
+                normalized == "application/ogg" ||
+                normalized == "application/x-ogg" ||
+                normalized == "application/flac" ||
+                normalized == "application/x-flac" ||
+                normalized == "application/itunes"
+        }
+
+        fun hasSupportedAudioExtension(nameOrPath: String?): Boolean {
+            if (nameOrPath.isNullOrBlank()) return false
+            val decoded = try {
+                Uri.decode(nameOrPath)
+            } catch (_: Exception) {
+                nameOrPath
+            }
+            val clean = decoded.substringBefore('?').substringBefore('#')
+            val ext = clean.substringAfterLast('.', "").lowercase().trim()
+            return ext in SUPPORTED_AUDIO_EXTENSIONS
+        }
 
         fun clampPosition(positionMs: Long, durationMs: Long): Long {
             val nonNegativePos = max(0L, positionMs)
@@ -453,6 +627,11 @@ class PlaybackStateRepository(
             } else {
                 nonNegativePos
             }
+        }
+
+        fun clampSpeed(speed: Float): Float {
+            if (speed.isNaN() || speed.isInfinite() || speed <= 0f) return 1.0f
+            return speed.coerceIn(0.25f, 3.0f)
         }
     }
 }

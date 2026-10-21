@@ -3,6 +3,7 @@ package com.example.player
 import androidx.compose.runtime.Immutable
 import com.example.data.model.RepeatMode
 import com.example.data.model.Song
+import kotlin.math.abs
 
 @Immutable
 data class PlayerUiState(
@@ -12,6 +13,7 @@ data class PlayerUiState(
     val durationMs: Long = 0L,
     val isShuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
+    val playbackSpeed: Float = 1.0f,
     val queue: List<Song> = emptyList(),
     val currentIndex: Int = -1,
     val isBuffering: Boolean = false,
@@ -25,4 +27,33 @@ data class PlayerUiState(
 
     val formattedDuration: String =
         if (durationMs <= 0L) "--:--" else Song.formatDurationMs(durationMs)
+
+    val formattedPlaybackSpeed: String = formatSpeed(playbackSpeed)
+
+    companion object {
+        val PLAYBACK_SPEED_OPTIONS: List<Float> = listOf(
+            0.5f,
+            0.75f,
+            1.0f,
+            1.25f,
+            1.5f,
+            1.75f,
+            2.0f
+        )
+
+        fun formatSpeed(speed: Float): String {
+            val safe = speed.coerceIn(0.25f, 3.0f)
+            return when {
+                abs(safe - 0.5f) < 0.01f -> "0.5×"
+                abs(safe - 0.75f) < 0.01f -> "0.75×"
+                abs(safe - 1.0f) < 0.01f -> "1×"
+                abs(safe - 1.25f) < 0.01f -> "1.25×"
+                abs(safe - 1.5f) < 0.01f -> "1.5×"
+                abs(safe - 1.75f) < 0.01f -> "1.75×"
+                abs(safe - 2.0f) < 0.01f -> "2×"
+                safe % 1.0f == 0f -> "${safe.toInt()}×"
+                else -> "${safe}×"
+            }
+        }
+    }
 }

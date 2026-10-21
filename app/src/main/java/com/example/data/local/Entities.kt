@@ -150,6 +150,8 @@ data class PlaybackStateEntity(
     val isPlaying: Boolean = false,
     val shuffleEnabled: Boolean = false,
     val repeatMode: String = "OFF",
+    val playbackSpeed: Float = 1.0f,
+    val isExternal: Boolean = false,
     val lastUpdated: Long = System.currentTimeMillis()
 ) {
     fun parseQueueSongIds(): List<Long> {
@@ -165,15 +167,20 @@ data class PlaybackStateEntity(
         } catch (_: Exception) {
             return null
         }
-        if (parsedUri.scheme.isNullOrBlank()) return null
+        val scheme = parsedUri.scheme?.lowercase()
+        if (scheme.isNullOrBlank()) return null
+        // Never convert a content:// URI into a filesystem path
+        val safePath = if (scheme == "file") (parsedUri.path ?: "") else ""
         return Song(
             id = songId,
             title = title.ifBlank { "Unknown Title" },
             artist = artist.ifBlank { "Unknown Artist" },
-            album = album.ifBlank { "Unknown Album" },
+            album = album.ifBlank { if (isExternal) "External Audio" else "Unknown Album" },
             durationMs = durationMs.coerceAtLeast(0L),
             contentUri = parsedUri,
-            albumArtUri = albumArtUriString?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+            albumArtUri = albumArtUriString?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) },
+            folderName = if (isExternal) "External" else "",
+            path = safePath
         )
     }
 

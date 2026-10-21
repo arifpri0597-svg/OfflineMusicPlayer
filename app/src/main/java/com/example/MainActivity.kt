@@ -163,10 +163,39 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(incomingIntent: android.content.Intent?) {
-        if (incomingIntent?.action == android.content.Intent.ACTION_VIEW) {
-            val audioUri = incomingIntent.data ?: return
-            viewModel.playExternalAudioUri(audioUri)
+        val action = incomingIntent?.action ?: return
+        if (action != android.content.Intent.ACTION_VIEW &&
+            action != android.content.Intent.ACTION_OPEN_DOCUMENT
+        ) {
+            return
         }
+        // Do not re-trigger an old external File Manager intent when reopening from Recent Apps
+        if ((incomingIntent.flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) {
+            return
+        }
+
+        val audioUri = incomingIntent.data ?: return
+        val mimeType = incomingIntent.type
+
+        if (audioUri.scheme?.lowercase() == "content") {
+            try {
+                val takeFlags = incomingIntent.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                val flagsToTake = if (takeFlags != 0) {
+                    takeFlags
+                } else {
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                }
+                contentResolver.takePersistableUriPermission(audioUri, flagsToTake)
+            } catch (_: Exception) {
+                // Provider does not support persistable permissions; safe to ignore
+            }
+        }
+
+        // Consume the external intent action/data so activity recreation does not re-fire it
+        incomingIntent.action = android.content.Intent.ACTION_MAIN
+        incomingIntent.data = null
+
+        viewModel.playExternalAudioUri(audioUri, mimeType)
     }
 
     override fun onResume() {
@@ -294,7 +323,13 @@ fun PulseMusicAppRoot(
 
     val recentSongs = remember(libraryState.songs, libraryState.historyItems) {
         val songMap = libraryState.songs.associateBy { it.id }
-        libraryState.historyItems.mapNotNull { songMap[it.songId] }.distinctBy { it.id }
+        libraryState.historyItems.mapNotNull { historyItem ->
+            songMap[historyItem.songId]
+                ?: libraryState.songs.firstOrNull {
+                    it.title.equals(historyItem.title, ignoreCase = true) &&
+                        it.artist.equals(historyItem.artist, ignoreCase = true)
+                }
+        }.distinctBy { it.id }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -623,6 +658,7 @@ private fun NowPlayingOverlaySection(
     val onAddToPlaylist = remember(viewModel) { { song: com.example.data.model.Song -> viewModel.setSongForAddToPlaylist(song) } }
     val onRemoveFromQueue = remember(viewModel) { { idx: Int -> viewModel.playerController.removeFromQueue(idx) } }
     val onJumpToQueueItem = remember(viewModel) { { idx: Int -> viewModel.playerController.jumpToQueueItem(idx) } }
+    val onPlaybackSpeedChange = remember(viewModel) { { speed: Float -> viewModel.playerController.setPlaybackSpeed(speed) } }
 
     AnimatedVisibility(
         visible = isExpanded,
@@ -655,7 +691,8 @@ private fun NowPlayingOverlaySection(
             onToggleFavorite = onToggleFavorite,
             onAddToPlaylist = onAddToPlaylist,
             onRemoveFromQueue = onRemoveFromQueue,
-            onJumpToQueueItem = onJumpToQueueItem
+            onJumpToQueueItem = onJumpToQueueItem,
+            onPlaybackSpeedChange = onPlaybackSpeedChange
         )
     }
 }

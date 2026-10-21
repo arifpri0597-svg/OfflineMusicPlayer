@@ -473,21 +473,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    fun playExternalAudioUri(uri: android.net.Uri) {
-        if (!isSafeExternalAudioUri(uri)) return
+    fun playExternalAudioUri(uri: android.net.Uri, mimeType: String? = null) {
+        if (!isSafeExternalAudioUri(uri)) {
+            playerController.reportExplicitPlaybackError("Invalid or unsupported audio file")
+            return
+        }
+
+        // Prevent startup restoration or MediaStore scan from racing with this external Intent
+        playerController.notifyExternalIntentPending()
 
         val currentSongs = _libraryState.value.songs
-        val existingMatch = currentSongs.firstOrNull { song ->
-            song.contentUri == uri ||
-                (uri.lastPathSegment != null && song.contentUri.lastPathSegment == uri.lastPathSegment)
-        }
-        if (existingMatch != null) {
-            playSongFromList(existingMatch, currentSongs)
+        val exactMatch = currentSongs.firstOrNull { song -> song.contentUri == uri }
+        if (exactMatch != null) {
+            playSongFromList(exactMatch, currentSongs)
             _libraryState.update { it.copy(isNowPlayingExpanded = true) }
             return
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            if (!playbackStateRepository.isExternalAudioUriValidAndAccessible(
+                    uri = uri,
+                    explicitMimeType = mimeType
+                )
+            ) {
+                launch(Dispatchers.Main) {
+                    playerController.reportExplicitPlaybackError("Unable to play the selected audio file")
+                }
+                return@launch
+            }
+
             val song = resolveExternalSong(uri)
             launch(Dispatchers.Main) {
                 playerController.playQueue(listOf(song), 0)
@@ -496,37 +510,54 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun resolveExternalSong(uri: android.net.Uri): Song {
+    internal fun resolveExternalSong(uri: android.net.Uri): Song {
         var displayName: String? = null
         var fileSize = 0L
 
-        try {
-            app.contentResolver.query(
-                uri,
-                arrayOf(
-                    android.provider.OpenableColumns.DISPLAY_NAME,
-                    android.provider.OpenableColumns.SIZE
-                ),
-                null,
-                null,
-                null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                    if (nameIdx != -1 && !cursor.isNull(nameIdx)) {
-                        displayName = cursor.getString(nameIdx)
-                    }
-                    if (sizeIdx != -1 && !cursor.isNull(sizeIdx)) {
-                        fileSize = cursor.getLong(sizeIdx)
+        if (uri.scheme?.lowercase() == "content") {
+            try {
+                app.contentResolver.query(
+                    uri,
+                    arrayOf(
+                        android.provider.OpenableColumns.DISPLAY_NAME,
+                        android.provider.OpenableColumns.SIZE
+                    ),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                        if (nameIdx != -1 && !cursor.isNull(nameIdx)) {
+                            displayName = cursor.getString(nameIdx)
+                        }
+                        if (sizeIdx != -1 && !cursor.isNull(sizeIdx)) {
+                            fileSize = cursor.getLong(sizeIdx)
+                        }
                     }
                 }
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
+        } else if (uri.scheme?.lowercase() == "file") {
+            uri.path?.let { filePath ->
+                val f = java.io.File(filePath)
+                if (f.exists()) {
+                    displayName = f.name
+                    fileSize = f.length()
+                }
+            }
         }
 
-        val fallbackTitle = (displayName ?: uri.lastPathSegment ?: "Audio Track")
+        val decodedSegment = try {
+            uri.lastPathSegment?.let { android.net.Uri.decode(it) }
+        } catch (_: Exception) {
+            uri.lastPathSegment
+        }
+
+        val fallbackTitle = (displayName ?: decodedSegment ?: "Audio Track")
             .substringAfterLast('/')
+            .substringAfterLast(':')
             .substringBeforeLast('.')
             .ifBlank { "Audio Track" }
 
@@ -537,7 +568,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         val retriever = android.media.MediaMetadataRetriever()
         try {
-            if (uri.scheme == "file" && uri.path != null) {
+            if (uri.scheme?.lowercase() == "file" && uri.path != null) {
                 retriever.setDataSource(uri.path)
             } else {
                 retriever.setDataSource(app, uri)
@@ -562,6 +593,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Keep original content:// URI directly for Media3; never convert content:// into a file path
+        val safePath = if (uri.scheme?.lowercase() == "file") (uri.path ?: "") else ""
+
         return Song(
             id = uri.toString().hashCode().toLong(),
             title = title,
@@ -573,7 +607,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             sizeBytes = fileSize,
             dateAdded = System.currentTimeMillis() / 1000L,
             folderName = "External",
-            path = uri.path ?: uri.toString()
+            path = safePath
         )
     }
 

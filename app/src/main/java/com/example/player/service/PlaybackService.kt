@@ -13,6 +13,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -96,6 +97,11 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+            if (isRestoringState) return
+            persistPlayerState(immediate = false)
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (isRestoringState) return
             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_READY) {
@@ -154,10 +160,16 @@ class PlaybackService : MediaSessionService() {
 
         isRestoringState = true
         try {
-            val mediaItems = session.queue.map { song ->
+            val validSongs = session.queue
+                .filter { it.contentUri.toString().isNotBlank() }
+                .distinctBy { "${it.id}_${it.contentUri}" }
+            if (validSongs.isEmpty()) return false
+
+            val mediaItems = validSongs.map { song ->
                 val extras = Bundle().apply {
                     putLong("durationMs", song.durationMs)
                     putString("contentUri", song.contentUri.toString())
+                    putBoolean("isExternal", session.isExternal || PlaybackStateRepository.isExternalUriString(song.contentUri.toString()))
                 }
                 val metadata = MediaMetadata.Builder()
                     .setTitle(song.title)
@@ -172,7 +184,9 @@ class PlaybackService : MediaSessionService() {
                     .setMediaMetadata(metadata)
                     .build()
             }
+            val safeIndex = session.currentIndex.coerceIn(0, mediaItems.size - 1)
             player.playWhenReady = false
+            player.setPlaybackSpeed(PlaybackStateRepository.clampSpeed(session.playbackSpeed))
             player.shuffleModeEnabled = session.shuffleEnabled
             player.repeatMode = when (session.repeatMode) {
                 RepeatMode.ONE -> Player.REPEAT_MODE_ONE
@@ -180,9 +194,10 @@ class PlaybackService : MediaSessionService() {
                 RepeatMode.OFF -> Player.REPEAT_MODE_OFF
             }
             restoredFloorPositionMs = session.positionMs
-            player.setMediaItems(mediaItems, session.currentIndex, session.positionMs)
-            player.seekTo(session.currentIndex, session.positionMs)
-            player.prepare()
+            player.setMediaItems(mediaItems, safeIndex, session.positionMs)
+            player.seekTo(safeIndex, session.positionMs)
+            // Do not call player.prepare() while paused on automatic startup restoration;
+            // preparing happens when the user explicitly initiates playback.
             lastSavedSongId = session.currentSong.id
             lastSavedPositionMs = session.positionMs
             return true
@@ -236,6 +251,14 @@ class PlaybackService : MediaSessionService() {
             else -> RepeatMode.OFF.name
         }
 
+        val currentSpeed = try {
+            PlaybackStateRepository.clampSpeed(player.playbackParameters.speed)
+        } catch (_: Exception) {
+            1.0f
+        }
+        val isExternal = (extras?.getBoolean("isExternal", false) == true) ||
+            PlaybackStateRepository.isExternalUriString(uriString)
+
         val stateEntity = PlaybackStateEntity(
             id = PlaybackStateEntity.SINGLETON_ID,
             songId = songId,
@@ -251,6 +274,8 @@ class PlaybackService : MediaSessionService() {
             isPlaying = player.isPlaying,
             shuffleEnabled = player.shuffleModeEnabled,
             repeatMode = repeatMode,
+            playbackSpeed = currentSpeed,
+            isExternal = isExternal,
             lastUpdated = System.currentTimeMillis()
         )
 

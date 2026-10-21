@@ -44,11 +44,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Allow opening audio files (MP3, WAV, M4A, AAC, FLAC, OGG, WEBM) from any File Manager ("Open with") -->
+            <!-- Allow opening audio files (MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WEBM) from any File Manager ("Open with") -->
             <intent-filter tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.OPEN_DOCUMENT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <category android:name="android.intent.category.OPENABLE" />
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:mimeType="audio/*" />
@@ -69,6 +71,7 @@
                 <data android:mimeType="application/flac" />
                 <data android:mimeType="application/x-flac" />
                 <data android:mimeType="audio/ogg" />
+                <data android:mimeType="audio/opus" />
                 <data android:mimeType="application/ogg" />
                 <data android:mimeType="application/x-ogg" />
                 <data android:mimeType="audio/webm" />

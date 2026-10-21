@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -66,9 +67,33 @@ class MusicPlayerController(
     private var lastSavedPositionMs: Long = -1L
     private var lastSavedSongId: Long = -1L
     private var isApplyingRestoredPlayerState: Boolean = false
+    @Volatile
+    private var isUserInitiatedPlayback: Boolean = false
+    @Volatile
+    private var hasExternalIntentOverride: Boolean = false
 
     fun isInRestoredPausedState(): Boolean {
         return isRestoredPausedState && !_uiState.value.isPlaying
+    }
+
+    /**
+     * Marks that an external File Manager Intent is actively being loaded so startup
+     * or MediaStore library scan callbacks do not race with or overwrite it.
+     */
+    fun notifyExternalIntentPending() {
+        hasExternalIntentOverride = true
+        isRestoredPausedState = false
+        restoredPositionFloorMs = null
+    }
+
+    fun reportExplicitPlaybackError(message: String) {
+        _uiState.update {
+            it.copy(
+                errorMessage = message,
+                isPlaying = false,
+                isBuffering = false
+            )
+        }
     }
 
     private val playerListener = object : Player.Listener {
@@ -150,13 +175,56 @@ class MusicPlayerController(
             }
         }
 
+        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+            val speed = PlaybackStateRepository.clampSpeed(playbackParameters.speed)
+            _uiState.update { it.copy(playbackSpeed = speed) }
+            if (!isApplyingRestoredPlayerState) {
+                saveCurrentPlaybackState(immediate = false)
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
+            // NEVER show "Source error" during automatic startup restoration or when not explicitly user-initiated
+            if (!isUserInitiatedPlayback || isRestoredPausedState || isApplyingRestoredPlayerState) {
+                isRestoredPausedState = false
+                restoredPositionFloorMs = null
+                val currentUriStr = _uiState.value.currentSong?.contentUri?.toString() ?: ""
+                if (PlaybackStateRepository.isExternalUriString(currentUriStr)) {
+                    activeQueue.clear()
+                    immutableQueue = emptyList()
+                    _uiState.update {
+                        it.copy(
+                            currentSong = null,
+                            queue = emptyList(),
+                            currentIndex = -1,
+                            isPlaying = false,
+                            isBuffering = false,
+                            positionMs = 0L,
+                            errorMessage = null
+                        )
+                    }
+                    scope.launch {
+                        playbackStateRepository?.clearPlaybackState()
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isPlaying = false,
+                            isBuffering = false,
+                            errorMessage = null
+                        )
+                    }
+                }
+                return
+            }
+
             val msg = error.message ?: "Playback error encountered"
-            _uiState.update { it.copy(errorMessage = msg) }
+            _uiState.update { it.copy(errorMessage = msg, isPlaying = false, isBuffering = false) }
             val player = controller ?: return
             if (player.hasNextMediaItem()) {
                 player.seekToNextMediaItem()
                 player.play()
+                _uiState.update { it.copy(errorMessage = msg) }
             }
         }
     }
@@ -212,10 +280,50 @@ class MusicPlayerController(
                         autoPlay = pending.autoPlay
                     )
                 } else if (connectedPlayer != null) {
-                    if (connectedPlayer.isPlaying || (connectedPlayer.mediaItemCount > 0 && !isRestoredPausedState)) {
+                    if (connectedPlayer.isPlaying) {
                         syncStateFromPlayer()
-                        if (connectedPlayer.isPlaying) {
-                            startProgressUpdate()
+                        startProgressUpdate()
+                    } else if (connectedPlayer.mediaItemCount > 0) {
+                        // If the service holds a paused external URI that is no longer accessible,
+                        // clear it silently rather than leaving a broken source loaded.
+                        val currentItem = connectedPlayer.currentMediaItem
+                        val uriStr = currentItem?.localConfiguration?.uri?.toString()
+                            ?: currentItem?.mediaMetadata?.extras?.getString("contentUri")
+                            ?: ""
+                        val repo = playbackStateRepository
+                        if (repo != null && PlaybackStateRepository.isExternalUriString(uriStr)) {
+                            val uri = try { Uri.parse(uriStr) } catch (_: Exception) { null }
+                            val isValid = uri != null && repo.isExternalAudioUriValidAndAccessible(
+                                uri = uri,
+                                fallbackTitle = currentItem?.mediaMetadata?.title?.toString()
+                            )
+                            if (!isValid) {
+                                connectedPlayer.clearMediaItems()
+                                activeQueue.clear()
+                                immutableQueue = emptyList()
+                                isRestoredPausedState = false
+                                restoredPositionFloorMs = null
+                                _uiState.update {
+                                    it.copy(
+                                        currentSong = null,
+                                        queue = emptyList(),
+                                        currentIndex = -1,
+                                        positionMs = 0L,
+                                        isPlaying = false,
+                                        errorMessage = null
+                                    )
+                                }
+                                scope.launch { repo.clearPlaybackState() }
+                                return@addListener
+                            }
+                        }
+
+                        if (!isRestoredPausedState) {
+                            syncStateFromPlayer()
+                        } else if (_uiState.value.currentSong != null) {
+                            applyRestoredStateToPlayer(connectedPlayer)
+                        } else {
+                            syncStateFromPlayer()
                         }
                     } else if (_uiState.value.currentSong != null && isRestoredPausedState) {
                         applyRestoredStateToPlayer(connectedPlayer)
@@ -230,16 +338,47 @@ class MusicPlayerController(
     }
 
     /**
-     * Restores the last saved playback state (track, queue, index, and clamped position)
+     * Restores the last saved playback state (track, queue, index, playback speed, and clamped position)
      * from [PlaybackStateRepository] without automatically starting playback.
      */
     suspend fun restorePlaybackState(librarySongs: List<Song> = emptyList()): Boolean {
         val repo = playbackStateRepository ?: return false
-        // Do not overwrite an actively playing track
-        if (_uiState.value.isPlaying) return false
+        // Do not overwrite an actively playing track or an incoming external File Manager intent
+        if (_uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
+            return false
+        }
+        val activePlayer = controller
+        if (activePlayer != null && activePlayer.isPlaying) {
+            return false
+        }
 
         val savedState = repo.getLastPlaybackState() ?: return false
-        val session = repo.resolveRestoredSession(savedState, librarySongs) ?: return false
+        val session = repo.resolveRestoredSession(savedState, librarySongs)
+        if (session == null) {
+            // If the saved state was an invalid/deleted external URI, clear any stale restored state in UI
+            if (isRestoredPausedState) {
+                isRestoredPausedState = false
+                restoredPositionFloorMs = null
+                activeQueue.clear()
+                immutableQueue = emptyList()
+                _uiState.update {
+                    it.copy(
+                        currentSong = null,
+                        queue = emptyList(),
+                        currentIndex = -1,
+                        positionMs = 0L,
+                        isPlaying = false,
+                        errorMessage = null
+                    )
+                }
+            }
+            return false
+        }
+
+        // Re-check after suspend point in case user started playing or external intent arrived
+        if (_uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
+            return false
+        }
 
         // If the user already manually switched to a different track in this session, don't overwrite it
         val existingSong = _uiState.value.currentSong
@@ -255,9 +394,19 @@ class MusicPlayerController(
             session.positionMs
         }
 
-        activeQueue = session.queue.toMutableList()
+        // Deduplicate and validate queue items
+        val cleanQueue = session.queue
+            .filter { it.contentUri.toString().isNotBlank() }
+            .distinctBy { "${it.id}_${it.contentUri}" }
+            .ifEmpty { listOf(session.currentSong) }
+
+        val cleanIndex = cleanQueue.indexOfFirst { it.id == session.currentSong.id }
+            .let { if (it != -1) it else 0 }
+
+        activeQueue = cleanQueue.toMutableList()
         immutableQueue = activeQueue.toList()
         isRestoredPausedState = true
+        isUserInitiatedPlayback = false
         restoredPositionFloorMs = effectivePos
         lastRecordedSongId = session.currentSong.id
         lastSavedSongId = session.currentSong.id
@@ -267,12 +416,14 @@ class MusicPlayerController(
             it.copy(
                 currentSong = session.currentSong,
                 queue = immutableQueue,
-                currentIndex = session.currentIndex,
+                currentIndex = cleanIndex,
                 positionMs = effectivePos,
                 durationMs = session.durationMs,
                 isPlaying = false,
                 isShuffleEnabled = session.shuffleEnabled,
-                repeatMode = session.repeatMode
+                repeatMode = session.repeatMode,
+                playbackSpeed = session.playbackSpeed,
+                errorMessage = null
             )
         }
 
@@ -286,7 +437,11 @@ class MusicPlayerController(
     private fun applyRestoredStateToPlayer(player: Player) {
         val state = _uiState.value
         val currentSong = state.currentSong ?: return
-        val queueToLoad = if (immutableQueue.isNotEmpty()) immutableQueue else listOf(currentSong)
+        val queueToLoad = (if (immutableQueue.isNotEmpty()) immutableQueue else listOf(currentSong))
+            .filter { it.contentUri.toString().isNotBlank() }
+            .distinctBy { "${it.id}_${it.contentUri}" }
+        if (queueToLoad.isEmpty()) return
+
         val targetIndex = state.currentIndex.coerceIn(0, queueToLoad.size - 1)
         val targetPos = PlaybackStateRepository.clampPosition(
             restoredPositionFloorMs ?: state.positionMs,
@@ -296,24 +451,41 @@ class MusicPlayerController(
         isApplyingRestoredPlayerState = true
         try {
             player.playWhenReady = false
+            player.setPlaybackSpeed(PlaybackStateRepository.clampSpeed(state.playbackSpeed))
             player.shuffleModeEnabled = state.isShuffleEnabled
             player.repeatMode = when (state.repeatMode) {
                 RepeatMode.ONE -> Player.REPEAT_MODE_ONE
                 RepeatMode.ALL -> Player.REPEAT_MODE_ALL
                 RepeatMode.OFF -> Player.REPEAT_MODE_OFF
             }
-            val mediaItems = ArrayList<MediaItem>(queueToLoad.size)
-            for (song in queueToLoad) {
-                mediaItems.add(songToMediaItem(song))
+
+            if (!isSamePlayerMediaItems(player, queueToLoad)) {
+                val mediaItems = ArrayList<MediaItem>(queueToLoad.size)
+                for (song in queueToLoad) {
+                    mediaItems.add(songToMediaItem(song))
+                }
+                player.setMediaItems(mediaItems, targetIndex, targetPos)
             }
-            player.setMediaItems(mediaItems, targetIndex, targetPos)
             player.seekTo(targetIndex, targetPos)
-            player.prepare()
+            // Do NOT call player.prepare() during automatic startup restoration while paused;
+            // preparing only when the user initiates playback prevents startup "Source error".
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {
             isApplyingRestoredPlayerState = false
         }
+    }
+
+    private fun isSamePlayerMediaItems(player: Player, songs: List<Song>): Boolean {
+        if (player.mediaItemCount != songs.size) return false
+        for (i in songs.indices) {
+            val item = player.getMediaItemAt(i)
+            if (item.mediaId != songs[i].id.toString()) return false
+            val itemUri = item.localConfiguration?.uri
+                ?: item.mediaMetadata.extras?.getString("contentUri")?.let { Uri.parse(it) }
+            if (itemUri != null && itemUri != songs[i].contentUri) return false
+        }
+        return true
     }
 
     private fun isSameQueue(songs: List<Song>): Boolean {
@@ -332,9 +504,15 @@ class MusicPlayerController(
         startPositionMs: Long? = null,
         autoPlay: Boolean = true
     ) {
-        if (songs.isEmpty()) return
-        val safeIndex = startIndex.coerceIn(0, songs.size - 1)
-        val targetSong = songs[safeIndex]
+        val validSongs = songs.filter { it.contentUri.toString().isNotBlank() }
+        if (validSongs.isEmpty()) return
+        val safeIndex = startIndex.coerceIn(0, validSongs.size - 1)
+        val targetSong = validSongs[safeIndex]
+
+        // Clear external intent override if user switched to a MediaStore song
+        if (!PlaybackStateRepository.isExternalUriString(targetSong.contentUri.toString())) {
+            hasExternalIntentOverride = false
+        }
 
         // If re-selecting the currently loaded/restored song and no explicit startPositionMs was given,
         // preserve its saved/current position rather than resetting to 0:00.
@@ -348,9 +526,11 @@ class MusicPlayerController(
         }
 
         if (autoPlay) {
+            isUserInitiatedPlayback = true
             isRestoredPausedState = false
             restoredPositionFloorMs = null
         } else {
+            isUserInitiatedPlayback = false
             isRestoredPausedState = true
             restoredPositionFloorMs = resolvedPositionMs
         }
@@ -364,12 +544,12 @@ class MusicPlayerController(
         val player = controller
         if (player == null) {
             pendingPlayRequest = PendingPlayRequest(
-                songs = songs,
+                songs = validSongs,
                 startIndex = safeIndex,
                 startPositionMs = resolvedPositionMs,
                 autoPlay = autoPlay
             )
-            activeQueue = songs.toMutableList()
+            activeQueue = validSongs.toMutableList()
             immutableQueue = activeQueue.toList()
             _uiState.update {
                 it.copy(
@@ -378,7 +558,8 @@ class MusicPlayerController(
                     currentSong = targetSong,
                     positionMs = resolvedPositionMs,
                     durationMs = if (targetSong.durationMs > 0L) targetSong.durationMs else it.durationMs,
-                    isPlaying = autoPlay
+                    isPlaying = autoPlay,
+                    errorMessage = null
                 )
             }
             if (targetSong.id != lastRecordedSongId) {
@@ -393,7 +574,9 @@ class MusicPlayerController(
             return
         }
 
-        if (player.mediaItemCount == songs.size && isSameQueue(songs) && player.playbackState != Player.STATE_IDLE) {
+        player.setPlaybackSpeed(PlaybackStateRepository.clampSpeed(currentState.playbackSpeed))
+
+        if (player.mediaItemCount == validSongs.size && isSameQueue(validSongs) && player.playbackState != Player.STATE_IDLE) {
             player.playWhenReady = autoPlay
             player.seekTo(safeIndex, resolvedPositionMs)
             if (autoPlay) {
@@ -402,18 +585,18 @@ class MusicPlayerController(
                 player.pause()
             }
         } else {
-            activeQueue = songs.toMutableList()
+            activeQueue = validSongs.toMutableList()
             immutableQueue = activeQueue.toList()
-            val mediaItems = ArrayList<MediaItem>(songs.size)
-            for (song in songs) {
+            val mediaItems = ArrayList<MediaItem>(validSongs.size)
+            for (song in validSongs) {
                 mediaItems.add(songToMediaItem(song))
             }
 
             player.playWhenReady = autoPlay
             player.setMediaItems(mediaItems, safeIndex, resolvedPositionMs)
             player.seekTo(safeIndex, resolvedPositionMs)
-            player.prepare()
             if (autoPlay) {
+                player.prepare()
                 player.play()
             }
         }
@@ -425,7 +608,8 @@ class MusicPlayerController(
                 currentSong = targetSong,
                 positionMs = resolvedPositionMs,
                 durationMs = if (targetSong.durationMs > 0L) targetSong.durationMs else it.durationMs,
-                isPlaying = autoPlay
+                isPlaying = autoPlay,
+                errorMessage = null
             )
         }
         if (targetSong.id != lastRecordedSongId) {
@@ -446,6 +630,7 @@ class MusicPlayerController(
             val currentSong = currentState.currentSong ?: return
             val queueToPlay = if (immutableQueue.isNotEmpty()) immutableQueue else listOf(currentSong)
             val willPlay = !currentState.isPlaying
+            isUserInitiatedPlayback = willPlay
             pendingPlayRequest = PendingPlayRequest(
                 songs = queueToPlay,
                 startIndex = currentState.currentIndex.coerceIn(0, queueToPlay.size - 1),
@@ -475,10 +660,27 @@ class MusicPlayerController(
                 immediate = true
             )
         } else {
+            val currentSong = currentState.currentSong
+            if (currentSong != null && PlaybackStateRepository.isExternalUriString(currentSong.contentUri.toString())) {
+                val repo = playbackStateRepository
+                if (repo != null && !repo.isExternalAudioUriValidAndAccessible(
+                        uri = currentSong.contentUri,
+                        fallbackTitle = currentSong.title
+                    )
+                ) {
+                    reportExplicitPlaybackError("Unable to play file: audio source is no longer available")
+                    scope.launch { repo.clearPlaybackState() }
+                    return
+                }
+            }
+
+            isUserInitiatedPlayback = true
             val resumePos = restoredPositionFloorMs ?: currentState.positionMs
             val wasRestored = isRestoredPausedState
             isRestoredPausedState = false
             restoredPositionFloorMs = null
+
+            player.setPlaybackSpeed(PlaybackStateRepository.clampSpeed(currentState.playbackSpeed))
 
             if (player.mediaItemCount == 0 && currentState.currentSong != null) {
                 val queueToLoad = if (immutableQueue.isNotEmpty()) immutableQueue else listOf(currentState.currentSong)
@@ -499,7 +701,7 @@ class MusicPlayerController(
                 }
             }
             player.play()
-            _uiState.update { it.copy(isPlaying = true, positionMs = resumePos) }
+            _uiState.update { it.copy(isPlaying = true, positionMs = resumePos, errorMessage = null) }
             saveCurrentPlaybackState(
                 positionOverride = resumePos,
                 isPlayingOverride = true,
@@ -508,8 +710,16 @@ class MusicPlayerController(
         }
     }
 
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = PlaybackStateRepository.clampSpeed(speed)
+        controller?.setPlaybackSpeed(clamped)
+        _uiState.update { it.copy(playbackSpeed = clamped) }
+        saveCurrentPlaybackState(immediate = true)
+    }
+
     fun skipToNext() {
         val player = controller ?: return
+        isUserInitiatedPlayback = true
         isRestoredPausedState = false
         restoredPositionFloorMs = null
         lastSeekPositionMs = null
@@ -518,12 +728,16 @@ class MusicPlayerController(
         } else if (player.mediaItemCount > 0) {
             player.seekToDefaultPosition(0)
         }
+        if (player.playbackState == Player.STATE_IDLE && player.playWhenReady) {
+            player.prepare()
+        }
         syncStateFromPlayer()
         saveCurrentPlaybackState(positionOverride = 0L, immediate = true)
     }
 
     fun skipToPrevious() {
         val player = controller ?: return
+        isUserInitiatedPlayback = true
         isRestoredPausedState = false
         restoredPositionFloorMs = null
         lastSeekPositionMs = null
@@ -533,6 +747,9 @@ class MusicPlayerController(
             player.seekToPreviousMediaItem()
         } else {
             player.seekTo(0L)
+        }
+        if (player.playbackState == Player.STATE_IDLE && player.playWhenReady) {
+            player.prepare()
         }
         syncStateFromPlayer()
         saveCurrentPlaybackState(positionOverride = 0L, immediate = true)
@@ -682,10 +899,14 @@ class MusicPlayerController(
     fun jumpToQueueItem(index: Int) {
         val player = controller ?: return
         if (index in activeQueue.indices) {
+            isUserInitiatedPlayback = true
             isRestoredPausedState = false
             restoredPositionFloorMs = null
             lastSeekPositionMs = null
             player.seekTo(index, 0L)
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
+            }
             player.play()
             syncStateFromPlayer()
             saveCurrentPlaybackState(positionOverride = 0L, isPlayingOverride = true, immediate = true)
@@ -729,10 +950,14 @@ class MusicPlayerController(
             currentSong.id.toString()
         }
 
+        val uriString = currentSong.contentUri.toString()
+        val isExternal = PlaybackStateRepository.isExternalUriString(uriString) ||
+            currentSong.folderName == "External"
+
         val entity = PlaybackStateEntity(
             id = PlaybackStateEntity.SINGLETON_ID,
             songId = currentSong.id,
-            contentUriString = currentSong.contentUri.toString(),
+            contentUriString = uriString,
             title = currentSong.title,
             artist = currentSong.artist,
             album = currentSong.album,
@@ -744,6 +969,8 @@ class MusicPlayerController(
             isPlaying = isPlayingNow,
             shuffleEnabled = state.isShuffleEnabled,
             repeatMode = state.repeatMode.name,
+            playbackSpeed = PlaybackStateRepository.clampSpeed(state.playbackSpeed),
+            isExternal = isExternal,
             lastUpdated = System.currentTimeMillis()
         )
 
@@ -789,6 +1016,8 @@ class MusicPlayerController(
                 return cached
             }
         }
+        val isExternal = PlaybackStateRepository.isExternalUriString(song.contentUri.toString()) ||
+            song.folderName == "External"
         val extras = Bundle().apply {
             putLong("durationMs", song.durationMs)
             putInt("trackNumber", song.trackNumber)
@@ -798,6 +1027,7 @@ class MusicPlayerController(
             putString("folderName", song.folderName)
             putString("path", song.path)
             putString("contentUri", song.contentUri.toString())
+            putBoolean("isExternal", isExternal)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(song.title)
@@ -880,6 +1110,13 @@ class MusicPlayerController(
             else -> RepeatMode.OFF
         }
 
+        val speed = try {
+            val rawSpeed = player.playbackParameters?.speed ?: _uiState.value.playbackSpeed
+            if (rawSpeed > 0f) PlaybackStateRepository.clampSpeed(rawSpeed) else _uiState.value.playbackSpeed
+        } catch (_: Exception) {
+            _uiState.value.playbackSpeed
+        }
+
         _uiState.update {
             it.copy(
                 currentSong = currentSong,
@@ -889,6 +1126,7 @@ class MusicPlayerController(
                 durationMs = duration,
                 isShuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = repeat,
+                playbackSpeed = speed,
                 queue = immutableQueue
             )
         }
