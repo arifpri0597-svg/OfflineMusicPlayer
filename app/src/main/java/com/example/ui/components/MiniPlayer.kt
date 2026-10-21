@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -22,8 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -31,7 +30,6 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -60,13 +59,10 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.model.RepeatMode
 import com.example.player.PlayerUiState
+import com.example.ui.theme.ElectricViolet
+import com.example.ui.theme.NeonPink
+import com.example.ui.theme.NeonPurple
 
-/**
- * Persistent mini-player overlay at the bottom of the screen displaying
- * currently playing track information, real-time playback progress, and
- * primary playback controls including Play/Pause, Previous, Next, Shuffle,
- * and Repeat toggles.
- */
 @Composable
 fun MiniPlayer(
     playerState: PlayerUiState,
@@ -81,7 +77,6 @@ fun MiniPlayer(
     modifier: Modifier = Modifier
 ) {
     val song = playerState.currentSong
-    val context = LocalContext.current
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
     AnimatedVisibility(
@@ -95,8 +90,8 @@ fun MiniPlayer(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -114,20 +109,20 @@ fun MiniPlayer(
                 }
                 .clickable(onClick = onExpandNowPlaying)
                 .testTag("mini_player_overlay"),
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 6.dp,
-            shadowElevation = 8.dp,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 8.dp,
+            shadowElevation = 12.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.35f))
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Persistent real-time progress indicator
                 LinearProgressIndicator(
                     progress = { playerState.progress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
                         .testTag("mini_player_progress"),
-                    color = MaterialTheme.colorScheme.primary,
+                    color = NeonPink,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     strokeCap = StrokeCap.Round
                 )
@@ -135,18 +130,16 @@ fun MiniPlayer(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Skippable Album artwork / placeholder thumbnail
                     MiniPlayerArtwork(
                         albumArtUri = song.albumArtUri,
                         isBuffering = playerState.isBuffering
                     )
 
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
-                    // Song Title & Artist text
                     Column(
                         modifier = Modifier.weight(1f)
                     ) {
@@ -172,12 +165,11 @@ fun MiniPlayer(
                             Text(
                                 text = " • ${playerState.formattedPosition}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
+                                color = NeonPink
                             )
                         }
                     }
 
-                    // Skippable Controls Strip: [Shuffle] [Play/Pause] [Next] [Repeat]
                     MiniPlayerControls(
                         isPlaying = playerState.isPlaying,
                         isShuffleEnabled = playerState.isShuffleEnabled,
@@ -202,8 +194,12 @@ private fun MiniPlayerArtwork(
     Box(
         modifier = Modifier
             .size(46.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .clip(RoundedCornerShape(13.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(ElectricViolet, NeonPink)
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (albumArtUri != null) {
@@ -227,8 +223,8 @@ private fun MiniPlayerArtwork(
             Icon(
                 imageVector = Icons.Default.MusicNote,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
             )
         }
 
@@ -259,9 +255,8 @@ private fun MiniPlayerControls(
     onSkipNext: () -> Unit,
     onCycleRepeatMode: () -> Unit
 ) {
-    // Shuffle Toggle Button
     val shuffleColor by animateColorAsState(
-        targetValue = if (isShuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        targetValue = if (isShuffleEnabled) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
         label = "mini_shuffle_color"
     )
     IconButton(
@@ -274,31 +269,31 @@ private fun MiniPlayerControls(
             imageVector = Icons.Default.Shuffle,
             contentDescription = if (isShuffleEnabled) "Shuffle On" else "Shuffle Off",
             tint = shuffleColor,
-            modifier = Modifier.size(19.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 
-    // Main Play/Pause Button
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(38.dp)
+            .size(40.dp)
             .clip(CircleShape)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(NeonPink, NeonPurple)
+                )
+            )
             .clickable(onClick = onTogglePlayPause)
             .testTag("mini_player_play_pause_btn")
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(22.dp)
-            )
-        }
+        Icon(
+            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+            contentDescription = if (isPlaying) "Pause" else "Play",
+            tint = Color.White,
+            modifier = Modifier.size(22.dp)
+        )
     }
 
-    // Next Track Button
     IconButton(
         onClick = onSkipNext,
         modifier = Modifier
@@ -313,14 +308,13 @@ private fun MiniPlayerControls(
         )
     }
 
-    // Repeat Toggle Button (Off -> All -> One)
     val repeatIcon = when (repeatMode) {
         RepeatMode.ONE -> Icons.Default.RepeatOne
         else -> Icons.Default.Repeat
     }
     val isRepeatActive = repeatMode != RepeatMode.OFF
     val repeatColor by animateColorAsState(
-        targetValue = if (isRepeatActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        targetValue = if (isRepeatActive) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
         label = "mini_repeat_color"
     )
     IconButton(
@@ -333,7 +327,8 @@ private fun MiniPlayerControls(
             imageVector = repeatIcon,
             contentDescription = "Repeat: $repeatMode",
             tint = repeatColor,
-            modifier = Modifier.size(19.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 }
+

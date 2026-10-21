@@ -1,7 +1,6 @@
 package com.example.ui.theme
 
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -12,47 +11,52 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = IndigoSecondary,
-    onPrimary = Color(0xFF0F172A),
-    primaryContainer = Color(0xFF312E81),
-    onPrimaryContainer = Color(0xFFE0E7FF),
-    secondary = CyanAccent,
-    onSecondary = Color(0xFF0F172A),
-    secondaryContainer = Color(0xFF0C4A6E),
-    onSecondaryContainer = Color(0xFFE0F2FE),
-    tertiary = PinkAccent,
-    onTertiary = Color.White,
+    primary = NeonPink,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFF3B1045),
+    onPrimaryContainer = Color(0xFFFFD8EC),
+    secondary = NeonPurple,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFF2E1454),
+    onSecondaryContainer = Color(0xFFEDE0FF),
+    tertiary = NeonPinkLight,
+    onTertiary = Color(0xFF280519),
     background = DarkBackground,
     onBackground = DarkOnBackground,
     surface = DarkSurface,
     onSurface = DarkOnSurface,
     surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = DarkOnSurfaceVariant
+    onSurfaceVariant = DarkOnSurfaceVariant,
+    surfaceContainer = DarkSurfaceContainer,
+    surfaceContainerHigh = DarkSurfaceContainerHigh,
+    outline = DarkCardBorder,
+    outlineVariant = Color(0xFF2D194D)
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = IndigoPrimary,
+    primary = NeonPink,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEEF2FF),
-    onPrimaryContainer = Color(0xFF312E81),
-    secondary = Color(0xFF0284C7),
+    primaryContainer = Color(0xFFFFE0F0),
+    onPrimaryContainer = Color(0xFF3B0926),
+    secondary = ElectricViolet,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE0F2FE),
-    onSecondaryContainer = Color(0xFF075985),
-    tertiary = PinkAccent,
+    secondaryContainer = Color(0xFFEDE0FF),
+    onSecondaryContainer = Color(0xFF2A0C4E),
+    tertiary = NeonPurple,
     onTertiary = Color.White,
     background = LightBackground,
     onBackground = LightOnBackground,
     surface = LightSurface,
     onSurface = LightOnSurface,
     surfaceVariant = LightSurfaceVariant,
-    onSurfaceVariant = LightOnSurfaceVariant
+    onSurfaceVariant = LightOnSurfaceVariant,
+    surfaceContainer = LightSurfaceContainer
 )
 
 @Composable
 fun PulseMusicTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    darkTheme: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -70,3 +74,4 @@ fun PulseMusicTheme(
         content = content
     )
 }
+

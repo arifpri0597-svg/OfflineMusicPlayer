@@ -98,8 +98,7 @@ class MainActivity : ComponentActivity() {
 
             val isDarkTheme = when (userThemePreference) {
                 "light" -> false
-                "dark" -> true
-                else -> isSystemInDarkTheme()
+                else -> true
             }
 
             PulseMusicTheme(darkTheme = isDarkTheme) {
@@ -294,6 +293,7 @@ fun PulseMusicAppRoot(
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 Column(
@@ -301,17 +301,17 @@ fun PulseMusicAppRoot(
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.navigationBars)
                 ) {
-                    // Isolated MiniPlayer section so 500ms progress ticks only recompose MiniPlayer
+                    // Isolated MiniPlayer section so 200ms progress ticks only recompose MiniPlayer
                     MiniPlayerSection(
                         viewModel = viewModel,
                         favoriteIds = libraryState.favoriteIds
                     )
 
-                    // Navigation Bar
+                    // Modern PureTune Bottom Navigation Bar
                     NavigationBar(
                         modifier = Modifier.testTag("bottom_nav_bar"),
                         containerColor = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 6.dp
+                        tonalElevation = 8.dp
                     ) {
                         BOTTOM_NAV_ITEMS.forEach { item ->
                             val isSelected = libraryState.selectedTab == item.tab
@@ -328,12 +328,16 @@ fun PulseMusicAppRoot(
                                     Text(
                                         text = item.label,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelSmall
                                     )
                                 },
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 ),
                                 modifier = Modifier.testTag("nav_item_${item.label.lowercase()}")
                             )
@@ -376,7 +380,9 @@ fun PulseMusicAppRoot(
                                 onAddToQueue = { viewModel.playerController.addToQueue(it) },
                                 onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) },
                                 onNavigateToSongs = { viewModel.setNavigationTab(NavigationTab.SONGS) },
-                                onNavigateToHistory = { viewModel.setNavigationTab(NavigationTab.HISTORY) }
+                                onNavigateToAlbums = { viewModel.setNavigationTab(NavigationTab.ALBUMS) },
+                                onNavigateToHistory = { viewModel.setNavigationTab(NavigationTab.HISTORY) },
+                                onNavigateToSettings = { viewModel.setNavigationTab(NavigationTab.SETTINGS) }
                             )
                         }
 
@@ -533,7 +539,7 @@ fun PulseMusicAppRoot(
             favoriteIds = libraryState.favoriteIds
         )
 
-        // Add to Playlist Dialog
+        // Add to Playlist Dialog (rendered above Now Playing so it works from both Library and Now Playing)
         libraryState.songForAddToPlaylist?.let { songToAdd ->
             AddToPlaylistDialog(
                 song = songToAdd,
@@ -596,6 +602,7 @@ private fun NowPlayingOverlaySection(
     val onSeekRelative = remember(viewModel) { { delta: Long -> viewModel.playerController.seekRelative(delta) } }
     val onToggleShuffle = remember(viewModel) { { viewModel.playerController.toggleShuffle() } }
     val onCycleRepeatMode = remember(viewModel) { { viewModel.playerController.cycleRepeatMode() } }
+    val onAddToPlaylist = remember(viewModel) { { song: com.example.data.model.Song -> viewModel.setSongForAddToPlaylist(song) } }
     val onRemoveFromQueue = remember(viewModel) { { idx: Int -> viewModel.playerController.removeFromQueue(idx) } }
     val onJumpToQueueItem = remember(viewModel) { { idx: Int -> viewModel.playerController.jumpToQueueItem(idx) } }
 
@@ -628,6 +635,7 @@ private fun NowPlayingOverlaySection(
             onToggleShuffle = onToggleShuffle,
             onCycleRepeatMode = onCycleRepeatMode,
             onToggleFavorite = onToggleFavorite,
+            onAddToPlaylist = onAddToPlaylist,
             onRemoveFromQueue = onRemoveFromQueue,
             onJumpToQueueItem = onJumpToQueueItem
         )
@@ -639,3 +647,4 @@ private data class NavItem(
     val label: String,
     val icon: ImageVector
 )
+

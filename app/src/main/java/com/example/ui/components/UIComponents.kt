@@ -1,7 +1,9 @@
 package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Folder
@@ -28,9 +31,9 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -50,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -65,6 +69,9 @@ import com.example.data.model.Album
 import com.example.data.model.Artist
 import com.example.data.model.Folder
 import com.example.data.model.Song
+import com.example.ui.theme.ElectricViolet
+import com.example.ui.theme.NeonPink
+import com.example.ui.theme.NeonPurple
 
 @Composable
 fun SongItemRow(
@@ -81,25 +88,51 @@ fun SongItemRow(
     var menuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
+    val cardBgColor by animateColorAsState(
+        targetValue = if (isPlaying) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        },
+        label = "song_row_bg"
+    )
+
+    val borderColor = if (isPlaying) {
+        NeonPink.copy(alpha = 0.7f)
+    } else {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    }
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onSongClick)
             .testTag("song_item_${song.id}"),
-        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else Color.Transparent
+        shape = RoundedCornerShape(18.dp),
+        color = cardBgColor,
+        border = BorderStroke(1.dp, borderColor)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album art thumbnail
+            // Album art thumbnail with neon gradient backdrop
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                ElectricViolet.copy(alpha = 0.45f),
+                                NeonPink.copy(alpha = 0.35f)
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
@@ -123,9 +156,25 @@ fun SongItemRow(
                     Icon(
                         imageVector = Icons.Default.MusicNote,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = if (isPlaying) NeonPink else NeonPurple,
                         modifier = Modifier.size(24.dp)
                     )
+                }
+
+                if (isPlaying) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Equalizer,
+                            contentDescription = "Playing",
+                            tint = NeonPink,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
 
@@ -139,11 +188,11 @@ fun SongItemRow(
                     text = song.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = song.artist,
@@ -156,21 +205,24 @@ fun SongItemRow(
                     Text(
                         text = " • ${song.formattedDuration}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (isPlaying) NeonPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
                 }
             }
 
             // Favorite Button
-            val favColor = if (isFavorite) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+            val favColor = if (isFavorite) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant
             IconButton(
                 onClick = onToggleFavorite,
-                modifier = Modifier.testTag("fav_btn_${song.id}")
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("fav_btn_${song.id}")
             ) {
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
-                    tint = favColor
+                    tint = favColor,
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
@@ -178,12 +230,15 @@ fun SongItemRow(
             Box {
                 IconButton(
                     onClick = { menuExpanded = true },
-                    modifier = Modifier.testTag("more_btn_${song.id}")
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("more_btn_${song.id}")
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "Song options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 DropdownMenu(
@@ -192,7 +247,7 @@ fun SongItemRow(
                 ) {
                     DropdownMenuItem(
                         text = { Text("Play Next") },
-                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonPink) },
                         onClick = {
                             menuExpanded = false
                             onPlayNext()
@@ -200,7 +255,7 @@ fun SongItemRow(
                     )
                     DropdownMenuItem(
                         text = { Text("Add to Queue") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPurple) },
                         onClick = {
                             menuExpanded = false
                             onAddToQueue()
@@ -208,7 +263,7 @@ fun SongItemRow(
                     )
                     DropdownMenuItem(
                         text = { Text("Add to Playlist") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPink) },
                         onClick = {
                             menuExpanded = false
                             onAddToPlaylist()
@@ -230,17 +285,28 @@ fun AlbumCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
             .testTag("album_card_${album.id}"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        )
     ) {
         Column {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                ElectricViolet.copy(alpha = 0.4f),
+                                NeonPink.copy(alpha = 0.25f)
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 if (album.artworkUri != null) {
@@ -265,7 +331,7 @@ fun AlbumCard(
                         imageVector = Icons.Default.Album,
                         contentDescription = null,
                         modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = NeonPink
                     )
                 }
             }
@@ -299,9 +365,13 @@ fun ArtistItemRow(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .testTag("artist_item_${artist.name}"),
-        color = Color.Transparent
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
     ) {
         Row(
             modifier = Modifier
@@ -313,14 +383,18 @@ fun ArtistItemRow(
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(NeonPink, NeonPurple)
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(28.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
@@ -350,9 +424,13 @@ fun FolderItemRow(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .testTag("folder_item_${folder.name}"),
-        color = Color.Transparent
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
     ) {
         Row(
             modifier = Modifier
@@ -363,15 +441,19 @@ fun FolderItemRow(
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(ElectricViolet, NeonPink.copy(alpha = 0.8f))
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Folder,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(26.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
@@ -406,22 +488,37 @@ fun SearchBarField(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag("search_field"),
-        placeholder = { Text(placeholderText) },
+        placeholder = {
+            Text(
+                text = placeholderText,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        },
         leadingIcon = {
-            Icon(Icons.Default.Search, contentDescription = "Search icon")
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search icon",
+                tint = NeonPink
+            )
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                    Icon(
+                        imageVector = Icons.Default.Clear,
+                        contentDescription = "Clear search",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         },
         singleLine = true,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+            focusedBorderColor = NeonPink,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
         )
     )
 }
@@ -444,16 +541,24 @@ fun EmptyStateView(
     ) {
         Box(
             modifier = Modifier
-                .size(80.dp)
+                .size(84.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            NeonPink.copy(alpha = 0.25f),
+                            NeonPurple.copy(alpha = 0.25f)
+                        )
+                    )
+                )
+                .border(1.dp, NeonPink.copy(alpha = 0.4f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = NeonPink
             )
         }
         Spacer(modifier = Modifier.height(16.dp))
@@ -475,10 +580,12 @@ fun EmptyStateView(
             Button(
                 onClick = onActionClick,
                 shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = NeonPink),
                 modifier = Modifier.testTag("empty_state_action_btn")
             ) {
-                Text(actionButtonText)
+                Text(actionButtonText, color = Color.White, fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
+
