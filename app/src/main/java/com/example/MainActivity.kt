@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -82,6 +84,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        configureHighRefreshRateDisplay()
 
         if (savedInstanceState == null) {
             handleIncomingIntent(intent)
@@ -108,6 +111,52 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            configureHighRefreshRateDisplay()
+        }
+    }
+
+    /**
+     * Negotiates the highest available display refresh rate (60Hz / 90Hz / 120Hz+)
+     * matching the active physical resolution so animations and scrolling run at peak smoothness.
+     */
+    internal fun configureHighRefreshRateDisplay() {
+        try {
+            val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay
+            } ?: return
+
+            val supportedModes = currentDisplay.supportedModes
+            if (supportedModes.isNullOrEmpty()) return
+
+            val currentMode = currentDisplay.mode
+            val bestMode = supportedModes
+                .filter {
+                    it.physicalWidth == currentMode.physicalWidth &&
+                        it.physicalHeight == currentMode.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate }
+                ?: supportedModes.maxByOrNull { it.refreshRate }
+                ?: return
+
+            val layoutParams = window.attributes
+            if (layoutParams.preferredDisplayModeId != bestMode.modeId ||
+                layoutParams.preferredRefreshRate != bestMode.refreshRate
+            ) {
+                layoutParams.preferredDisplayModeId = bestMode.modeId
+                layoutParams.preferredRefreshRate = bestMode.refreshRate
+                window.attributes = layoutParams
+            }
+        } catch (_: Exception) {
+            // Safely ignore on environments/tests without WindowManager display modes
+        }
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -123,6 +172,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        configureHighRefreshRateDisplay()
         // Re-check permissions on resume (e.g., if user returned from Settings)
         val hasPermission = checkAudioPermission()
         viewModel.onPermissionResult(hasPermission)
@@ -299,7 +349,10 @@ fun PulseMusicAppRoot(
             ) {
                 AnimatedContent(
                     targetState = libraryState.selectedTab,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing))
+                    },
                     label = "tab_transition"
                 ) { tab ->
                     when (tab) {
@@ -322,7 +375,8 @@ fun PulseMusicAppRoot(
                                 onPlayNext = { viewModel.playerController.playNext(it) },
                                 onAddToQueue = { viewModel.playerController.addToQueue(it) },
                                 onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) },
-                                onNavigateToSongs = { viewModel.setNavigationTab(NavigationTab.SONGS) }
+                                onNavigateToSongs = { viewModel.setNavigationTab(NavigationTab.SONGS) },
+                                onNavigateToHistory = { viewModel.setNavigationTab(NavigationTab.HISTORY) }
                             )
                         }
 
@@ -460,7 +514,11 @@ fun PulseMusicAppRoot(
                                 currentTheme = libraryState.userThemePreference,
                                 onThemeChange = { viewModel.setThemeMode(it) },
                                 onClearHistory = { viewModel.clearHistory() },
-                                onClearFavorites = { viewModel.clearFavorites() }
+                                onClearFavorites = { viewModel.clearFavorites() },
+                                resumeLastPlayback = libraryState.resumeLastPlayback,
+                                onResumeLastChange = { viewModel.setResumeLastPlayback(it) },
+                                autoPauseOnHeadsetUnplug = libraryState.pauseOnHeadsetUnplug,
+                                onPauseOnHeadsetUnplugChange = { viewModel.setPauseOnHeadsetUnplug(it) }
                             )
                         }
                     }
@@ -498,22 +556,29 @@ private fun MiniPlayerSection(
     favoriteIds: Set<Long>
 ) {
     val playerState by viewModel.playerUiState.collectAsState()
-    val isCurrentFavorite = playerState.currentSong?.let {
-        favoriteIds.contains(it.id)
-    } ?: false
+    val currentSongId = playerState.currentSong?.id
+    val isCurrentFavorite = currentSongId != null && favoriteIds.contains(currentSongId)
+
+    val onTogglePlayPause = remember(viewModel) { { viewModel.playerController.togglePlayPause() } }
+    val onSkipNext = remember(viewModel) { { viewModel.playerController.skipToNext() } }
+    val onSkipPrevious = remember(viewModel) { { viewModel.playerController.skipToPrevious() } }
+    val onToggleShuffle = remember(viewModel) { { viewModel.playerController.toggleShuffle() } }
+    val onCycleRepeatMode = remember(viewModel) { { viewModel.playerController.cycleRepeatMode() } }
+    val onToggleFavorite = remember(viewModel, currentSongId) {
+        { currentSongId?.let { viewModel.toggleFavorite(it) } ?: Unit }
+    }
+    val onExpandNowPlaying = remember(viewModel) { { viewModel.setNowPlayingExpanded(true) } }
 
     MiniPlayer(
         playerState = playerState,
         isFavorite = isCurrentFavorite,
-        onTogglePlayPause = { viewModel.playerController.togglePlayPause() },
-        onSkipNext = { viewModel.playerController.skipToNext() },
-        onSkipPrevious = { viewModel.playerController.skipToPrevious() },
-        onToggleShuffle = { viewModel.playerController.toggleShuffle() },
-        onCycleRepeatMode = { viewModel.playerController.cycleRepeatMode() },
-        onToggleFavorite = {
-            playerState.currentSong?.let { viewModel.toggleFavorite(it.id) }
-        },
-        onExpandNowPlaying = { viewModel.setNowPlayingExpanded(true) }
+        onTogglePlayPause = onTogglePlayPause,
+        onSkipNext = onSkipNext,
+        onSkipPrevious = onSkipPrevious,
+        onToggleShuffle = onToggleShuffle,
+        onCycleRepeatMode = onCycleRepeatMode,
+        onToggleFavorite = onToggleFavorite,
+        onExpandNowPlaying = onExpandNowPlaying
     )
 }
 
@@ -523,31 +588,48 @@ private fun NowPlayingOverlaySection(
     isExpanded: Boolean,
     favoriteIds: Set<Long>
 ) {
+    val onCollapse = remember(viewModel) { { viewModel.setNowPlayingExpanded(false) } }
+    val onTogglePlayPause = remember(viewModel) { { viewModel.playerController.togglePlayPause() } }
+    val onSkipNext = remember(viewModel) { { viewModel.playerController.skipToNext() } }
+    val onSkipPrevious = remember(viewModel) { { viewModel.playerController.skipToPrevious() } }
+    val onSeekTo = remember(viewModel) { { pos: Long -> viewModel.playerController.seekTo(pos) } }
+    val onSeekRelative = remember(viewModel) { { delta: Long -> viewModel.playerController.seekRelative(delta) } }
+    val onToggleShuffle = remember(viewModel) { { viewModel.playerController.toggleShuffle() } }
+    val onCycleRepeatMode = remember(viewModel) { { viewModel.playerController.cycleRepeatMode() } }
+    val onRemoveFromQueue = remember(viewModel) { { idx: Int -> viewModel.playerController.removeFromQueue(idx) } }
+    val onJumpToQueueItem = remember(viewModel) { { idx: Int -> viewModel.playerController.jumpToQueueItem(idx) } }
+
     AnimatedVisibility(
         visible = isExpanded,
-        enter = slideInVertically(initialOffsetY = { it }),
-        exit = slideOutVertically(targetOffsetY = { it })
+        enter = slideInVertically(
+            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+            initialOffsetY = { it }
+        ),
+        exit = slideOutVertically(
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+            targetOffsetY = { it }
+        )
     ) {
         val playerState by viewModel.playerUiState.collectAsState()
-        val isCurrentFav = playerState.currentSong?.let { favoriteIds.contains(it.id) } == true
+        val currentSongId = playerState.currentSong?.id
+        val isCurrentFav = currentSongId != null && favoriteIds.contains(currentSongId)
+        val onToggleFavorite = remember(viewModel, currentSongId) {
+            { currentSongId?.let { viewModel.toggleFavorite(it) } ?: Unit }
+        }
         NowPlayingScreen(
             playerState = playerState,
             isFavorite = isCurrentFav,
-            onCollapse = { viewModel.setNowPlayingExpanded(false) },
-            onTogglePlayPause = { viewModel.playerController.togglePlayPause() },
-            onSkipNext = { viewModel.playerController.skipToNext() },
-            onSkipPrevious = { viewModel.playerController.skipToPrevious() },
-            onSeekTo = { viewModel.playerController.seekTo(it) },
-            onSeekRelative = { viewModel.playerController.seekRelative(it) },
-            onToggleShuffle = { viewModel.playerController.toggleShuffle() },
-            onCycleRepeatMode = { viewModel.playerController.cycleRepeatMode() },
-            onToggleFavorite = {
-                playerState.currentSong?.let { viewModel.toggleFavorite(it.id) }
-            },
-            onRemoveFromQueue = { viewModel.playerController.removeFromQueue(it) },
-            onJumpToQueueItem = { index ->
-                viewModel.playerController.jumpToQueueItem(index)
-            }
+            onCollapse = onCollapse,
+            onTogglePlayPause = onTogglePlayPause,
+            onSkipNext = onSkipNext,
+            onSkipPrevious = onSkipPrevious,
+            onSeekTo = onSeekTo,
+            onSeekRelative = onSeekRelative,
+            onToggleShuffle = onToggleShuffle,
+            onCycleRepeatMode = onCycleRepeatMode,
+            onToggleFavorite = onToggleFavorite,
+            onRemoveFromQueue = onRemoveFromQueue,
+            onJumpToQueueItem = onJumpToQueueItem
         )
     }
 }

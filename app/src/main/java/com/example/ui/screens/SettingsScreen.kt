@@ -51,13 +51,16 @@ fun SettingsScreen(
     onThemeChange: (String) -> Unit,
     onClearHistory: () -> Unit,
     onClearFavorites: () -> Unit,
+    resumeLastPlayback: Boolean = true,
+    onResumeLastChange: (Boolean) -> Unit = {},
+    autoPauseOnHeadsetUnplug: Boolean = true,
+    onPauseOnHeadsetUnplugChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showClearFavoritesDialog by remember { mutableStateOf(false) }
-    var resumeLastPlayback by remember { mutableStateOf(true) }
-    var autoPauseOnHeadsetUnplug by remember { mutableStateOf(true) }
+    var showAudioFocusDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -65,7 +68,7 @@ fun SettingsScreen(
             .testTag("settings_screen"),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp)
     ) {
-        item {
+        item(key = "settings_header", contentType = "header") {
             Text(
                 text = "Settings",
                 style = MaterialTheme.typography.headlineMedium,
@@ -75,7 +78,7 @@ fun SettingsScreen(
         }
 
         // Appearance
-        item {
+        item(key = "settings_appearance", contentType = "section") {
             SectionHeader(title = "Appearance")
             SettingsCard {
                 SettingsItem(
@@ -94,7 +97,7 @@ fun SettingsScreen(
         }
 
         // Playback Behavior
-        item {
+        item(key = "settings_playback", contentType = "section") {
             SectionHeader(title = "Playback")
             SettingsCard {
                 SettingsSwitchItem(
@@ -102,20 +105,20 @@ fun SettingsScreen(
                     title = "Resume Last Playback",
                     subtitle = "Remember last queue and track position on restart",
                     checked = resumeLastPlayback,
-                    onCheckedChange = { resumeLastPlayback = it }
+                    onCheckedChange = onResumeLastChange
                 )
                 SettingsSwitchItem(
                     icon = Icons.Default.Headphones,
                     title = "Pause on Headset Unplug",
                     subtitle = "Automatically pause when headphones or Bluetooth disconnect",
                     checked = autoPauseOnHeadsetUnplug,
-                    onCheckedChange = { autoPauseOnHeadsetUnplug = it }
+                    onCheckedChange = onPauseOnHeadsetUnplugChange
                 )
                 SettingsItem(
                     icon = Icons.Default.VolumeUp,
                     title = "Audio Focus Handling",
                     subtitle = "Automatic pause and ducking on calls and notifications",
-                    onClick = { },
+                    onClick = { showAudioFocusDialog = true },
                     tag = "audio_focus_item"
                 )
             }
@@ -123,7 +126,7 @@ fun SettingsScreen(
         }
 
         // Library & Data Management
-        item {
+        item(key = "settings_data", contentType = "section") {
             SectionHeader(title = "Data Management")
             SettingsCard {
                 SettingsItem(
@@ -145,7 +148,7 @@ fun SettingsScreen(
         }
 
         // Privacy & Security
-        item {
+        item(key = "settings_privacy", contentType = "section") {
             SectionHeader(title = "Privacy & Security")
             SettingsCard {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -175,7 +178,7 @@ fun SettingsScreen(
         }
 
         // About
-        item {
+        item(key = "settings_about", contentType = "section") {
             SectionHeader(title = "About")
             SettingsCard {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -235,6 +238,27 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = { showThemeDialog = false }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    // Audio Focus Handling Dialog
+    if (showAudioFocusDialog) {
+        AlertDialog(
+            onDismissRequest = { showAudioFocusDialog = false },
+            title = { Text("Audio Focus Handling") },
+            text = {
+                Text(
+                    "Pulse Music uses Android Media3 AudioAttributes (USAGE_MEDIA / AUDIO_CONTENT_TYPE_MUSIC) to automatically:\n\n" +
+                        "• Pause playback during phone calls or voice recordings and resume when finished\n" +
+                        "• Lower (duck) volume temporarily when navigation or notification sounds play\n" +
+                        "• Pause immediately when wired or Bluetooth headphones disconnect"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showAudioFocusDialog = false }) {
+                    Text("OK")
                 }
             }
         )

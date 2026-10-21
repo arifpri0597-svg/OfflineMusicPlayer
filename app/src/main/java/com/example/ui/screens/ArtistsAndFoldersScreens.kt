@@ -281,7 +281,7 @@ fun FoldersScreen(
             ) {
                 items(
                     items = folders,
-                    key = { it.path },
+                    key = { "${it.name}_${it.path}" },
                     contentType = { "folder_row" }
                 ) { folder ->
                     FolderItemRow(

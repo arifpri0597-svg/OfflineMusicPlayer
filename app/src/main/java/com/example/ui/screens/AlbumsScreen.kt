@@ -233,7 +233,7 @@ fun AlbumsScreen(
             ) {
                 items(
                     items = albums,
-                    key = { it.id },
+                    key = { "${it.id}_${it.title}" },
                     contentType = { "album_card" }
                 ) { album ->
                     AlbumCard(

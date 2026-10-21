@@ -45,6 +45,8 @@ class PulseMusicApp : Application(), ImageLoaderFactory {
                     .maxSizePercent(0.05)
                     .build()
             }
+            .allowHardware(true)
+            .allowRgb565(true)
             .crossfade(false)
             .build()
     }

@@ -66,7 +66,9 @@ data class LibraryUiState(
     val isNowPlayingExpanded: Boolean = false,
     val isQueueVisible: Boolean = false,
     val hasPermission: Boolean = false,
-    val userThemePreference: String = "system"
+    val userThemePreference: String = "system",
+    val resumeLastPlayback: Boolean = true,
+    val pauseOnHeadsetUnplug: Boolean = true
 )
 
 @Stable
@@ -173,6 +175,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .distinctUntilChanged()
                 .collect { mode ->
                     _libraryState.update { it.copy(userThemePreference = mode) }
+                }
+        }
+        viewModelScope.launch {
+            userPrefs.resumeLast
+                .distinctUntilChanged()
+                .collect { resume ->
+                    _libraryState.update { it.copy(resumeLastPlayback = resume) }
+                }
+        }
+        viewModelScope.launch {
+            userPrefs.pauseOnHeadsetUnplug
+                .distinctUntilChanged()
+                .collect { pauseOnUnplug ->
+                    _libraryState.update { it.copy(pauseOnHeadsetUnplug = pauseOnUnplug) }
                 }
         }
     }
@@ -296,8 +312,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addSongToPlaylist(playlistId: Long, song: Song) {
         viewModelScope.launch(Dispatchers.IO) {
-            val count = musicDao.getPlaylistTrackCount(playlistId)
-            musicDao.addSongToPlaylist(PlaylistSongCrossRef(playlistId = playlistId, songId = song.id, orderIndex = count))
+            musicDao.appendSongsToPlaylist(playlistId, listOf(song.id))
             _libraryState.update { it.copy(songForAddToPlaylist = null) }
         }
     }
@@ -305,11 +320,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
         if (songIds.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            var currentCount = musicDao.getPlaylistTrackCount(playlistId)
-            val crossRefs = songIds.map { id ->
-                PlaylistSongCrossRef(playlistId = playlistId, songId = id, orderIndex = currentCount++)
-            }
-            musicDao.addSongsToPlaylist(crossRefs)
+            musicDao.appendSongsToPlaylist(playlistId, songIds)
         }
     }
 
@@ -364,6 +375,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setResumeLastPlayback(enabled: Boolean) {
+        _libraryState.update { it.copy(resumeLastPlayback = enabled) }
+        viewModelScope.launch {
+            userPrefs.setResumeLast(enabled)
+        }
+    }
+
+    fun setPauseOnHeadsetUnplug(enabled: Boolean) {
+        _libraryState.update { it.copy(pauseOnHeadsetUnplug = enabled) }
+        viewModelScope.launch {
+            userPrefs.setPauseOnHeadsetUnplug(enabled)
+        }
+    }
+
     private fun recordSongHistory(song: Song) {
         viewModelScope.launch(Dispatchers.IO) {
             musicDao.insertHistory(
@@ -391,7 +416,33 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playerController.playQueue(list, 0)
     }
 
+    /**
+     * Validates that an incoming external URI uses a permitted scheme (content/file)
+     * and does not traverse into the application's private internal data directories.
+     */
+    internal fun isSafeExternalAudioUri(uri: android.net.Uri): Boolean {
+        val scheme = uri.scheme?.lowercase() ?: return false
+        if (scheme != "content" && scheme != "file") return false
+
+        if (scheme == "file") {
+            val rawPath = uri.path ?: return false
+            return try {
+                val canonicalTarget = java.io.File(rawPath).canonicalPath
+                val privateDataDir = app.applicationInfo?.dataDir?.let { java.io.File(it).canonicalPath }
+                val privateFilesDir = app.filesDir?.parentFile?.canonicalPath
+                val isInsidePrivateDir = (privateDataDir != null && canonicalTarget.startsWith(privateDataDir)) ||
+                    (privateFilesDir != null && canonicalTarget.startsWith(privateFilesDir))
+                !isInsidePrivateDir
+            } catch (_: Exception) {
+                false
+            }
+        }
+        return true
+    }
+
     fun playExternalAudioUri(uri: android.net.Uri) {
+        if (!isSafeExternalAudioUri(uri)) return
+
         val currentSongs = _libraryState.value.songs
         val existingMatch = currentSongs.firstOrNull { song ->
             song.contentUri == uri ||

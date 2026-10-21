@@ -64,20 +64,20 @@ fun SongsScreen(
 ) {
     val filteredSongs by remember(songs, searchQuery, sortOrder) {
         derivedStateOf {
-            val queried = if (searchQuery.isBlank()) {
+            val q = searchQuery.trim()
+            val queried = if (q.isEmpty()) {
                 songs
             } else {
-                val q = searchQuery.trim().lowercase()
                 songs.filter {
-                    it.title.lowercase().contains(q) ||
-                    it.artist.lowercase().contains(q) ||
-                    it.album.lowercase().contains(q)
+                    it.title.contains(q, ignoreCase = true) ||
+                        it.artist.contains(q, ignoreCase = true) ||
+                        it.album.contains(q, ignoreCase = true)
                 }
             }
 
             when (sortOrder) {
-                SortOrder.TITLE_ASC -> queried.sortedBy { it.title.lowercase() }
-                SortOrder.ARTIST_ASC -> queried.sortedBy { it.artist.lowercase() }
+                SortOrder.TITLE_ASC -> queried.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+                SortOrder.ARTIST_ASC -> queried.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
                 SortOrder.DURATION_DESC -> queried.sortedByDescending { it.durationMs }
                 SortOrder.DATE_ADDED_DESC -> queried.sortedByDescending { it.dateAdded }
             }
@@ -196,7 +196,11 @@ fun SongsScreen(
                     }
                 }
 
-                items(filteredSongs, key = { it.id }) { song ->
+                items(
+                    items = filteredSongs,
+                    key = { it.id },
+                    contentType = { "song_row" }
+                ) { song ->
                     SongItemRow(
                         song = song,
                         isPlaying = isPlaying && currentSongId == song.id,

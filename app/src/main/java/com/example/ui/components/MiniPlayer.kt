@@ -138,56 +138,11 @@ fun MiniPlayer(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Album artwork / placeholder thumbnail
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (song.albumArtUri != null) {
-                            val imageRequest = remember(song.albumArtUri) {
-                                val key = "thumb_${song.albumArtUri}"
-                                ImageRequest.Builder(context)
-                                    .data(song.albumArtUri)
-                                    .memoryCacheKey(key)
-                                    .diskCacheKey(key)
-                                    .crossfade(false)
-                                    .size(144, 144)
-                                    .build()
-                            }
-                            AsyncImage(
-                                model = imageRequest,
-                                contentDescription = "Mini player artwork",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // Subtle buffering indicator overlay
-                        if (playerState.isBuffering) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.4f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
+                    // Skippable Album artwork / placeholder thumbnail
+                    MiniPlayerArtwork(
+                        albumArtUri = song.albumArtUri,
+                        isBuffering = playerState.isBuffering
+                    )
 
                     Spacer(modifier = Modifier.width(10.dp))
 
@@ -222,88 +177,163 @@ fun MiniPlayer(
                         }
                     }
 
-                    // Controls Strip: [Shuffle] [Play/Pause] [Next] [Repeat]
-
-                    // Shuffle Toggle Button
-                    val isShuffleActive = playerState.isShuffleEnabled
-                    val shuffleColor by animateColorAsState(
-                        targetValue = if (isShuffleActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        label = "mini_shuffle_color"
+                    // Skippable Controls Strip: [Shuffle] [Play/Pause] [Next] [Repeat]
+                    MiniPlayerControls(
+                        isPlaying = playerState.isPlaying,
+                        isShuffleEnabled = playerState.isShuffleEnabled,
+                        repeatMode = playerState.repeatMode,
+                        onToggleShuffle = onToggleShuffle,
+                        onTogglePlayPause = onTogglePlayPause,
+                        onSkipNext = onSkipNext,
+                        onCycleRepeatMode = onCycleRepeatMode
                     )
-                    IconButton(
-                        onClick = onToggleShuffle,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .testTag("mini_player_shuffle_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shuffle,
-                            contentDescription = if (isShuffleActive) "Shuffle On" else "Shuffle Off",
-                            tint = shuffleColor,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Main Play/Pause Button
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onTogglePlayPause)
-                            .testTag("mini_player_play_pause_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (playerState.isPlaying) "Pause" else "Play",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-
-                    // Next Track Button
-                    IconButton(
-                        onClick = onSkipNext,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .testTag("mini_player_next_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Next Track",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(21.dp)
-                        )
-                    }
-
-                    // Repeat Toggle Button (Off -> All -> One)
-                    val repeatIcon = when (playerState.repeatMode) {
-                        RepeatMode.ONE -> Icons.Default.RepeatOne
-                        else -> Icons.Default.Repeat
-                    }
-                    val isRepeatActive = playerState.repeatMode != RepeatMode.OFF
-                    val repeatColor by animateColorAsState(
-                        targetValue = if (isRepeatActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        label = "mini_repeat_color"
-                    )
-                    IconButton(
-                        onClick = onCycleRepeatMode,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .testTag("mini_player_repeat_btn")
-                    ) {
-                        Icon(
-                            imageVector = repeatIcon,
-                            contentDescription = "Repeat: ${playerState.repeatMode}",
-                            tint = repeatColor,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniPlayerArtwork(
+    albumArtUri: android.net.Uri?,
+    isBuffering: Boolean
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        if (albumArtUri != null) {
+            val imageRequest = remember(albumArtUri) {
+                val key = "thumb_$albumArtUri"
+                ImageRequest.Builder(context)
+                    .data(albumArtUri)
+                    .memoryCacheKey(key)
+                    .diskCacheKey(key)
+                    .crossfade(false)
+                    .size(144, 144)
+                    .build()
+            }
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = "Mini player artwork",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        if (isBuffering) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniPlayerControls(
+    isPlaying: Boolean,
+    isShuffleEnabled: Boolean,
+    repeatMode: RepeatMode,
+    onToggleShuffle: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onSkipNext: () -> Unit,
+    onCycleRepeatMode: () -> Unit
+) {
+    // Shuffle Toggle Button
+    val shuffleColor by animateColorAsState(
+        targetValue = if (isShuffleEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        label = "mini_shuffle_color"
+    )
+    IconButton(
+        onClick = onToggleShuffle,
+        modifier = Modifier
+            .size(34.dp)
+            .testTag("mini_player_shuffle_btn")
+    ) {
+        Icon(
+            imageVector = Icons.Default.Shuffle,
+            contentDescription = if (isShuffleEnabled) "Shuffle On" else "Shuffle Off",
+            tint = shuffleColor,
+            modifier = Modifier.size(19.dp)
+        )
+    }
+
+    // Main Play/Pause Button
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onTogglePlayPause)
+            .testTag("mini_player_play_pause_btn")
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+
+    // Next Track Button
+    IconButton(
+        onClick = onSkipNext,
+        modifier = Modifier
+            .size(34.dp)
+            .testTag("mini_player_next_btn")
+    ) {
+        Icon(
+            imageVector = Icons.Default.SkipNext,
+            contentDescription = "Next Track",
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(21.dp)
+        )
+    }
+
+    // Repeat Toggle Button (Off -> All -> One)
+    val repeatIcon = when (repeatMode) {
+        RepeatMode.ONE -> Icons.Default.RepeatOne
+        else -> Icons.Default.Repeat
+    }
+    val isRepeatActive = repeatMode != RepeatMode.OFF
+    val repeatColor by animateColorAsState(
+        targetValue = if (isRepeatActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        label = "mini_repeat_color"
+    )
+    IconButton(
+        onClick = onCycleRepeatMode,
+        modifier = Modifier
+            .size(34.dp)
+            .testTag("mini_player_repeat_btn")
+    ) {
+        Icon(
+            imageVector = repeatIcon,
+            contentDescription = "Repeat: $repeatMode",
+            tint = repeatColor,
+            modifier = Modifier.size(19.dp)
+        )
     }
 }

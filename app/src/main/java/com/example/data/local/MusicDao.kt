@@ -73,6 +73,8 @@ interface MusicDao {
             if (staleIds.isNotEmpty()) {
                 staleIds.chunked(500).forEach { chunk ->
                     deleteSongsByIds(chunk)
+                    deletePlaylistSongsBySongIds(chunk)
+                    deleteFavoritesBySongIds(chunk)
                 }
             }
         }
@@ -96,6 +98,9 @@ interface MusicDao {
 
     @Query("DELETE FROM favorites WHERE songId = :songId")
     suspend fun deleteFavorite(songId: Long)
+
+    @Query("DELETE FROM favorites WHERE songId IN (:songIds)")
+    suspend fun deleteFavoritesBySongIds(songIds: List<Long>)
 
     @Query("DELETE FROM favorites")
     suspend fun clearFavorites()
@@ -143,6 +148,9 @@ interface MusicDao {
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun deletePlaylistSongs(playlistId: Long)
 
+    @Query("DELETE FROM playlist_songs WHERE songId IN (:songIds)")
+    suspend fun deletePlaylistSongsBySongIds(songIds: List<Long>)
+
     @Transaction
     suspend fun deletePlaylistWithSongs(playlistId: Long) {
         deletePlaylistSongs(playlistId)
@@ -157,6 +165,16 @@ interface MusicDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addSongsToPlaylist(crossRefs: List<PlaylistSongCrossRef>)
+
+    @Transaction
+    suspend fun appendSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
+        if (songIds.isEmpty()) return
+        var currentCount = getPlaylistTrackCount(playlistId)
+        val crossRefs = songIds.map { id ->
+            PlaylistSongCrossRef(playlistId = playlistId, songId = id, orderIndex = currentCount++)
+        }
+        addSongsToPlaylist(crossRefs)
+    }
 
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: Long)

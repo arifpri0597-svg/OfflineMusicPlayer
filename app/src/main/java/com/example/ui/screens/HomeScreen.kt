@@ -68,6 +68,7 @@ fun HomeScreen(
     onAddToQueue: (Song) -> Unit,
     onAddToPlaylist: (Song) -> Unit = {},
     onNavigateToSongs: () -> Unit,
+    onNavigateToHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (songs.isEmpty()) {
@@ -160,19 +161,31 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Recently Played",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         Text(
-                            text = "Recently Played",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            text = "History",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clickable(onClick = onNavigateToHistory)
+                                .testTag("home_view_history_btn")
                         )
                     }
 
@@ -213,7 +226,7 @@ fun HomeScreen(
                     ) {
                         items(
                             items = albumsPreview,
-                            key = { it.id },
+                            key = { "${it.id}_${it.title}" },
                             contentType = { "album_card" }
                         ) { album ->
                             HomeAlbumCard(
@@ -317,6 +330,7 @@ private fun RecentSongCard(
     isPlaying: Boolean,
     onClick: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Card(
         modifier = Modifier
             .width(130.dp)
@@ -336,8 +350,18 @@ private fun RecentSongCard(
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
+                    val imageRequest = androidx.compose.runtime.remember(song.albumArtUri) {
+                        val key = "recent_${song.albumArtUri}"
+                        coil.request.ImageRequest.Builder(context)
+                            .data(song.albumArtUri)
+                            .memoryCacheKey(key)
+                            .diskCacheKey(key)
+                            .crossfade(false)
+                            .size(256, 256)
+                            .build()
+                    }
                     AsyncImage(
-                        model = song.albumArtUri,
+                        model = imageRequest,
                         contentDescription = song.title,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -375,6 +399,7 @@ private fun HomeAlbumCard(
     album: Album,
     onClick: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Card(
         modifier = Modifier
             .width(140.dp)
@@ -392,8 +417,18 @@ private fun HomeAlbumCard(
                 contentAlignment = Alignment.Center
             ) {
                 if (album.artworkUri != null) {
+                    val imageRequest = androidx.compose.runtime.remember(album.artworkUri) {
+                        val key = "album_${album.artworkUri}"
+                        coil.request.ImageRequest.Builder(context)
+                            .data(album.artworkUri)
+                            .memoryCacheKey(key)
+                            .diskCacheKey(key)
+                            .crossfade(false)
+                            .size(300, 300)
+                            .build()
+                    }
                     AsyncImage(
-                        model = album.artworkUri,
+                        model = imageRequest,
                         contentDescription = album.title,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop

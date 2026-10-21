@@ -34,6 +34,7 @@ class MusicPlayerController(
     initialPlayer: Player? = null
 ) {
     private var controller: Player? = initialPlayer
+    private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
     private var progressJob: Job? = null
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -116,10 +117,11 @@ class MusicPlayerController(
             context,
             ComponentName(context, PlaybackService::class.java)
         )
-        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-        controllerFuture.addListener({
+        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture = future
+        future.addListener({
             try {
-                controller = controllerFuture.get()
+                controller = future.get()
                 controller?.addListener(playerListener)
                 val pending = pendingPlayRequest
                 if (pending != null) {
@@ -299,7 +301,19 @@ class MusicPlayerController(
             activeQueue.removeAt(index)
             immutableQueue = activeQueue.toList()
             player.removeMediaItem(index)
-            _uiState.update { it.copy(queue = immutableQueue) }
+            if (immutableQueue.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        queue = emptyList(),
+                        currentSong = null,
+                        currentIndex = 0,
+                        isPlaying = false,
+                        positionMs = 0L
+                    )
+                }
+            } else {
+                syncStateFromPlayer()
+            }
         }
     }
 
@@ -308,6 +322,7 @@ class MusicPlayerController(
         if (index in activeQueue.indices) {
             player.seekTo(index, 0L)
             player.play()
+            syncStateFromPlayer()
         }
     }
 
@@ -388,14 +403,14 @@ class MusicPlayerController(
                     val pos = max(0L, player.currentPosition)
                     val dur = max(0L, player.duration)
                     _uiState.update { current ->
-                        if (current.positionMs / 250L == pos / 250L && current.durationMs == dur) {
+                        if (current.positionMs / 100L == pos / 100L && current.durationMs == dur) {
                             current
                         } else {
                             current.copy(positionMs = pos, durationMs = dur)
                         }
                     }
                 }
-                delay(500)
+                delay(200)
             }
         }
     }
@@ -408,7 +423,10 @@ class MusicPlayerController(
     fun release() {
         stopProgressUpdate()
         controller?.removeListener(playerListener)
-        controller?.release()
+        controllerFuture?.let {
+            MediaController.releaseFuture(it)
+            controllerFuture = null
+        } ?: controller?.release()
         controller = null
     }
 }

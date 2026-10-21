@@ -115,4 +115,57 @@ class ExampleRobolectricTest {
             }
         }
     }
+
+    @Test
+    fun `test external audio uri security validation blocks private app directory traversal`() {
+        val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
+        val viewModel = com.example.viewmodel.MusicViewModel(app)
+
+        val validContentUri = android.net.Uri.parse("content://media/external/audio/media/42")
+        val validStorageFileUri = android.net.Uri.parse("file:///storage/emulated/0/Music/song.mp3")
+        val invalidSchemeUri = android.net.Uri.parse("javascript:alert(1)")
+        val privateDbFile = java.io.File(app.applicationInfo.dataDir, "databases/pulse_music_database.db")
+        val privateFileUri = android.net.Uri.fromFile(privateDbFile)
+
+        assertTrue(viewModel.isSafeExternalAudioUri(validContentUri))
+        assertTrue(viewModel.isSafeExternalAudioUri(validStorageFileUri))
+        assertFalse(viewModel.isSafeExternalAudioUri(invalidSchemeUri))
+        assertFalse(viewModel.isSafeExternalAudioUri(privateFileUri))
+    }
+
+    @Test
+    fun `test atomic appendSongsToPlaylist and orphan cleanup on syncScannedSongs`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, PulseDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val dao = db.musicDao()
+
+        val song1 = com.example.data.local.SongEntity(
+            id = 10L,
+            title = "Track 10",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 120_000L,
+            contentUriString = "content://media/external/audio/media/10",
+            albumArtUriString = null
+        )
+        val song2 = song1.copy(id = 20L, title = "Track 20")
+
+        dao.syncScannedSongs(listOf(song1, song2))
+        val playlistId = dao.insertPlaylist(PlaylistEntity(name = "Audit Playlist"))
+        dao.appendSongsToPlaylist(playlistId, listOf(10L, 20L))
+        dao.insertFavorite(com.example.data.local.FavoriteEntity(songId = 20L))
+
+        assertEquals(2, dao.getPlaylistTrackCount(playlistId))
+        assertTrue(dao.isFavorite(20L).first())
+
+        // Sync with only song1 remaining -> song2 should be pruned from songs, playlist_songs, and favorites
+        dao.syncScannedSongs(listOf(song1))
+        assertEquals(listOf(10L), dao.getAllCachedSongIds())
+        assertEquals(1, dao.getPlaylistTrackCount(playlistId))
+        assertFalse(dao.isFavorite(20L).first())
+
+        db.close()
+    }
 }
