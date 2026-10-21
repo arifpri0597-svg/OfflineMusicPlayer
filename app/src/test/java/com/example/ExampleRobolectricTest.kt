@@ -71,4 +71,48 @@ class ExampleRobolectricTest {
 
         db.close()
     }
+
+    @Test
+    fun `test open with audio intent filters resolve MainActivity for all supported formats`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val packageManager = context.packageManager
+
+        val supportedMimeTypes = listOf(
+            "audio/mpeg",       // MP3
+            "audio/mp3",        // MP3
+            "audio/wav",        // WAV
+            "audio/x-wav",      // WAV
+            "audio/mp4",        // M4A
+            "audio/m4a",        // M4A
+            "audio/x-m4a",      // M4A
+            "audio/aac",        // AAC
+            "audio/flac",       // FLAC
+            "audio/x-flac",     // FLAC
+            "application/flac", // FLAC
+            "audio/ogg",        // OGG
+            "application/ogg"   // OGG
+        )
+
+        val testUris = listOf(
+            android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3AMusic%2Ftrack.mp3"),
+            android.net.Uri.parse("file:///storage/emulated/0/Music/track.mp3")
+        )
+
+        for (uri in testUris) {
+            for (mimeType in supportedMimeTypes) {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mimeType)
+                    addCategory(android.content.Intent.CATEGORY_DEFAULT)
+                }
+                val resolved = packageManager.queryIntentActivities(intent, 0)
+                val matchesMainActivity = resolved.any {
+                    it.activityInfo.name == MainActivity::class.java.name
+                }
+                assertTrue(
+                    "MainActivity must resolve in Open with menu for scheme=${uri.scheme} mimeType=$mimeType",
+                    matchesMainActivity
+                )
+            }
+        }
+    }
 }

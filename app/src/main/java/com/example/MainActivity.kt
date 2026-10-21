@@ -83,6 +83,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        if (savedInstanceState == null) {
+            handleIncomingIntent(intent)
+        }
+
         setContent {
             val libraryState by viewModel.libraryState.collectAsState()
             val playerState by viewModel.playerUiState.collectAsState()
@@ -99,6 +103,19 @@ class MainActivity : ComponentActivity() {
                     onRequestPermission = { checkAndRequestPermissions() }
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(incomingIntent: android.content.Intent?) {
+        if (incomingIntent?.action == android.content.Intent.ACTION_VIEW) {
+            val audioUri = incomingIntent.data ?: return
+            viewModel.playExternalAudioUri(audioUri)
         }
     }
 
@@ -175,7 +192,7 @@ fun PulseMusicAppRoot(
         }
     }
 
-    if (!libraryState.hasPermission) {
+    if (!libraryState.hasPermission && playerState.currentSong == null) {
         PermissionView(
             onRequestPermission = onRequestPermission
         )

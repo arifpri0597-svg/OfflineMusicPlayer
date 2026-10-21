@@ -335,6 +335,108 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playerController.playQueue(list, 0)
     }
 
+    fun playExternalAudioUri(uri: android.net.Uri) {
+        val currentSongs = _libraryState.value.songs
+        val existingMatch = currentSongs.firstOrNull { song ->
+            song.contentUri == uri ||
+                (uri.lastPathSegment != null && song.contentUri.lastPathSegment == uri.lastPathSegment)
+        }
+        if (existingMatch != null) {
+            playSongFromList(existingMatch, currentSongs)
+            _libraryState.update { it.copy(isNowPlayingExpanded = true) }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val song = resolveExternalSong(uri)
+            launch(Dispatchers.Main) {
+                playerController.playQueue(listOf(song), 0)
+                _libraryState.update { it.copy(isNowPlayingExpanded = true) }
+            }
+        }
+    }
+
+    private fun resolveExternalSong(uri: android.net.Uri): Song {
+        var displayName: String? = null
+        var fileSize = 0L
+
+        try {
+            app.contentResolver.query(
+                uri,
+                arrayOf(
+                    android.provider.OpenableColumns.DISPLAY_NAME,
+                    android.provider.OpenableColumns.SIZE
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (nameIdx != -1 && !cursor.isNull(nameIdx)) {
+                        displayName = cursor.getString(nameIdx)
+                    }
+                    if (sizeIdx != -1 && !cursor.isNull(sizeIdx)) {
+                        fileSize = cursor.getLong(sizeIdx)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        val fallbackTitle = (displayName ?: uri.lastPathSegment ?: "Audio Track")
+            .substringAfterLast('/')
+            .substringBeforeLast('.')
+            .ifBlank { "Audio Track" }
+
+        var title = fallbackTitle
+        var artist = "Unknown Artist"
+        var album = "External Audio"
+        var durationMs = 0L
+
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            if (uri.scheme == "file" && uri.path != null) {
+                retriever.setDataSource(uri.path)
+            } else {
+                retriever.setDataSource(app, uri)
+            }
+            retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { title = it }
+            retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { artist = it }
+            retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { album = it }
+            retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?.let { durationMs = it }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+
+        return Song(
+            id = uri.toString().hashCode().toLong(),
+            title = title,
+            artist = artist,
+            album = album,
+            durationMs = durationMs,
+            contentUri = uri,
+            albumArtUri = null,
+            sizeBytes = fileSize,
+            dateAdded = System.currentTimeMillis() / 1000L,
+            folderName = "External",
+            path = uri.path ?: uri.toString()
+        )
+    }
+
     override fun onCleared() {
         super.onCleared()
         playerController.release()
