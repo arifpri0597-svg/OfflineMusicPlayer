@@ -51,11 +51,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.RepeatMode
 import com.example.player.PlayerUiState
 
@@ -79,6 +81,7 @@ fun MiniPlayer(
     modifier: Modifier = Modifier
 ) {
     val song = playerState.currentSong
+    val context = LocalContext.current
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
     AnimatedVisibility(
@@ -144,8 +147,18 @@ fun MiniPlayer(
                         contentAlignment = Alignment.Center
                     ) {
                         if (song.albumArtUri != null) {
+                            val imageRequest = remember(song.albumArtUri) {
+                                val key = "thumb_${song.albumArtUri}"
+                                ImageRequest.Builder(context)
+                                    .data(song.albumArtUri)
+                                    .memoryCacheKey(key)
+                                    .diskCacheKey(key)
+                                    .crossfade(false)
+                                    .size(144, 144)
+                                    .build()
+                            }
                             AsyncImage(
-                                model = song.albumArtUri,
+                                model = imageRequest,
                                 contentDescription = "Mini player artwork",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop

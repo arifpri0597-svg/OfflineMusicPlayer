@@ -88,10 +88,12 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val libraryState by viewModel.libraryState.collectAsState()
-            val playerState by viewModel.playerUiState.collectAsState()
+            val libraryStateRef = viewModel.libraryState.collectAsState()
+            val userThemePreference by remember {
+                androidx.compose.runtime.derivedStateOf { libraryStateRef.value.userThemePreference }
+            }
 
-            val isDarkTheme = when (libraryState.userThemePreference) {
+            val isDarkTheme = when (userThemePreference) {
                 "light" -> false
                 "dark" -> true
                 else -> isSystemInDarkTheme()
@@ -175,24 +177,40 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private val BOTTOM_NAV_ITEMS = listOf(
+    NavItem(NavigationTab.HOME, "Home", Icons.Default.Home),
+    NavItem(NavigationTab.SONGS, "Songs", Icons.Default.MusicNote),
+    NavItem(NavigationTab.PLAYLISTS, "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
+    NavItem(NavigationTab.ALBUMS, "Albums", Icons.Default.Album),
+    NavItem(NavigationTab.ARTISTS, "Artists", Icons.Default.Person),
+    NavItem(NavigationTab.FOLDERS, "Folders", Icons.Default.Folder),
+    NavItem(NavigationTab.FAVORITES, "Favorites", Icons.Default.Favorite),
+    NavItem(NavigationTab.SETTINGS, "Settings", Icons.Default.Settings)
+)
+
 @Composable
 fun PulseMusicAppRoot(
     viewModel: MusicViewModel,
     onRequestPermission: () -> Unit
 ) {
     val libraryState by viewModel.libraryState.collectAsState()
-    val playerState by viewModel.playerUiState.collectAsState()
+    val playerStateRef = viewModel.playerUiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val currentSongId by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.currentSong?.id } }
+    val isPlaying by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.isPlaying } }
+    val hasCurrentSong by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.currentSong != null } }
+    val errorMessage by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.errorMessage } }
+
     // Display error message if playback error occurs
-    LaunchedEffect(playerState.errorMessage) {
-        playerState.errorMessage?.let { errorMsg ->
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { errorMsg ->
             snackbarHostState.showSnackbar(errorMsg)
             viewModel.playerController.clearErrorMessage()
         }
     }
 
-    if (!libraryState.hasPermission && playerState.currentSong == null) {
+    if (!libraryState.hasPermission && !hasCurrentSong) {
         PermissionView(
             onRequestPermission = onRequestPermission
         )
@@ -233,23 +251,10 @@ fun PulseMusicAppRoot(
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.navigationBars)
                 ) {
-                    val isCurrentFavorite = playerState.currentSong?.let {
-                        libraryState.favoriteIds.contains(it.id)
-                    } ?: false
-
-                    // Mini player floating persistently just above the navigation bar
-                    MiniPlayer(
-                        playerState = playerState,
-                        isFavorite = isCurrentFavorite,
-                        onTogglePlayPause = { viewModel.playerController.togglePlayPause() },
-                        onSkipNext = { viewModel.playerController.skipToNext() },
-                        onSkipPrevious = { viewModel.playerController.skipToPrevious() },
-                        onToggleShuffle = { viewModel.playerController.toggleShuffle() },
-                        onCycleRepeatMode = { viewModel.playerController.cycleRepeatMode() },
-                        onToggleFavorite = {
-                            playerState.currentSong?.let { viewModel.toggleFavorite(it.id) }
-                        },
-                        onExpandNowPlaying = { viewModel.setNowPlayingExpanded(true) }
+                    // Isolated MiniPlayer section so 500ms progress ticks only recompose MiniPlayer
+                    MiniPlayerSection(
+                        viewModel = viewModel,
+                        favoriteIds = libraryState.favoriteIds
                     )
 
                     // Navigation Bar
@@ -258,18 +263,7 @@ fun PulseMusicAppRoot(
                         containerColor = MaterialTheme.colorScheme.surface,
                         tonalElevation = 6.dp
                     ) {
-                        val navItems = listOf(
-                            NavItem(NavigationTab.HOME, "Home", Icons.Default.Home),
-                            NavItem(NavigationTab.SONGS, "Songs", Icons.Default.MusicNote),
-                            NavItem(NavigationTab.PLAYLISTS, "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
-                            NavItem(NavigationTab.ALBUMS, "Albums", Icons.Default.Album),
-                            NavItem(NavigationTab.ARTISTS, "Artists", Icons.Default.Person),
-                            NavItem(NavigationTab.FOLDERS, "Folders", Icons.Default.Folder),
-                            NavItem(NavigationTab.FAVORITES, "Favorites", Icons.Default.Favorite),
-                            NavItem(NavigationTab.SETTINGS, "Settings", Icons.Default.Settings)
-                        )
-
-                        navItems.forEach { item ->
+                        BOTTOM_NAV_ITEMS.forEach { item ->
                             val isSelected = libraryState.selectedTab == item.tab
                             NavigationBarItem(
                                 selected = isSelected,
@@ -315,8 +309,8 @@ fun PulseMusicAppRoot(
                                 albums = libraryState.albums,
                                 favoriteSongs = favoriteSongs,
                                 recentSongs = recentSongs,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onShuffleAll = { viewModel.playAll(libraryState.songs, shuffle = true) },
                                 onPlayAll = { viewModel.playAll(libraryState.songs, shuffle = false) },
@@ -337,8 +331,8 @@ fun PulseMusicAppRoot(
                                 songs = libraryState.songs,
                                 isLoading = libraryState.isLoading,
                                 favoriteIds = libraryState.favoriteIds,
-                                currentPlayingSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentPlayingSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onPlayAll = { viewModel.playAll(it, shuffle = false) },
                                 onShuffleAll = { viewModel.playAll(it, shuffle = true) },
@@ -357,8 +351,8 @@ fun PulseMusicAppRoot(
                                 playlistSongs = libraryState.selectedPlaylistSongs,
                                 allSongs = libraryState.songs,
                                 favoriteIds = libraryState.favoriteIds,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onPlaylistSelect = { viewModel.selectPlaylist(it) },
                                 onCreatePlaylist = { viewModel.createPlaylist(it) },
                                 onDeletePlaylist = { viewModel.deletePlaylist(it) },
@@ -379,8 +373,8 @@ fun PulseMusicAppRoot(
                                 allSongs = libraryState.songs,
                                 selectedAlbum = libraryState.selectedAlbum,
                                 favoriteIds = libraryState.favoriteIds,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onAlbumSelect = { viewModel.selectAlbum(it) },
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onPlayAll = { viewModel.playAll(it, shuffle = false) },
@@ -398,8 +392,8 @@ fun PulseMusicAppRoot(
                                 allSongs = libraryState.songs,
                                 selectedArtist = libraryState.selectedArtist,
                                 favoriteIds = libraryState.favoriteIds,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onArtistSelect = { viewModel.selectArtist(it) },
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onPlayAll = { viewModel.playAll(it, shuffle = false) },
@@ -417,8 +411,8 @@ fun PulseMusicAppRoot(
                                 allSongs = libraryState.songs,
                                 selectedFolder = libraryState.selectedFolder,
                                 favoriteIds = libraryState.favoriteIds,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onFolderSelect = { viewModel.selectFolder(it) },
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onPlayAll = { viewModel.playAll(it, shuffle = false) },
@@ -433,8 +427,8 @@ fun PulseMusicAppRoot(
                         NavigationTab.FAVORITES -> {
                             FavoritesScreen(
                                 favoriteSongs = favoriteSongs,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onPlayAll = { viewModel.playAll(it, shuffle = false) },
                                 onShuffleAll = { viewModel.playAll(it, shuffle = true) },
@@ -449,8 +443,8 @@ fun PulseMusicAppRoot(
                         NavigationTab.HISTORY -> {
                             HistoryScreen(
                                 recentSongs = recentSongs,
-                                currentSongId = playerState.currentSong?.id,
-                                isPlaying = playerState.isPlaying,
+                                currentSongId = currentSongId,
+                                isPlaying = isPlaying,
                                 favoriteIds = libraryState.favoriteIds,
                                 onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
                                 onClearHistory = { viewModel.clearHistory() },
@@ -475,32 +469,11 @@ fun PulseMusicAppRoot(
         }
 
         // Full Screen Now Playing overlay with slide-up transition
-        AnimatedVisibility(
-            visible = libraryState.isNowPlayingExpanded && playerState.currentSong != null,
-            enter = slideInVertically(initialOffsetY = { it }),
-            exit = slideOutVertically(targetOffsetY = { it })
-        ) {
-            val isCurrentFav = playerState.currentSong?.let { libraryState.favoriteIds.contains(it.id) } == true
-            NowPlayingScreen(
-                playerState = playerState,
-                isFavorite = isCurrentFav,
-                onCollapse = { viewModel.setNowPlayingExpanded(false) },
-                onTogglePlayPause = { viewModel.playerController.togglePlayPause() },
-                onSkipNext = { viewModel.playerController.skipToNext() },
-                onSkipPrevious = { viewModel.playerController.skipToPrevious() },
-                onSeekTo = { viewModel.playerController.seekTo(it) },
-                onSeekRelative = { viewModel.playerController.seekRelative(it) },
-                onToggleShuffle = { viewModel.playerController.toggleShuffle() },
-                onCycleRepeatMode = { viewModel.playerController.cycleRepeatMode() },
-                onToggleFavorite = {
-                    playerState.currentSong?.let { viewModel.toggleFavorite(it.id) }
-                },
-                onRemoveFromQueue = { viewModel.playerController.removeFromQueue(it) },
-                onJumpToQueueItem = { index ->
-                    viewModel.playerController.jumpToQueueItem(index)
-                }
-            )
-        }
+        NowPlayingOverlaySection(
+            viewModel = viewModel,
+            isExpanded = libraryState.isNowPlayingExpanded && hasCurrentSong,
+            favoriteIds = libraryState.favoriteIds
+        )
 
         // Add to Playlist Dialog
         libraryState.songForAddToPlaylist?.let { songToAdd ->
@@ -516,6 +489,66 @@ fun PulseMusicAppRoot(
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun MiniPlayerSection(
+    viewModel: MusicViewModel,
+    favoriteIds: Set<Long>
+) {
+    val playerState by viewModel.playerUiState.collectAsState()
+    val isCurrentFavorite = playerState.currentSong?.let {
+        favoriteIds.contains(it.id)
+    } ?: false
+
+    MiniPlayer(
+        playerState = playerState,
+        isFavorite = isCurrentFavorite,
+        onTogglePlayPause = { viewModel.playerController.togglePlayPause() },
+        onSkipNext = { viewModel.playerController.skipToNext() },
+        onSkipPrevious = { viewModel.playerController.skipToPrevious() },
+        onToggleShuffle = { viewModel.playerController.toggleShuffle() },
+        onCycleRepeatMode = { viewModel.playerController.cycleRepeatMode() },
+        onToggleFavorite = {
+            playerState.currentSong?.let { viewModel.toggleFavorite(it.id) }
+        },
+        onExpandNowPlaying = { viewModel.setNowPlayingExpanded(true) }
+    )
+}
+
+@Composable
+private fun NowPlayingOverlaySection(
+    viewModel: MusicViewModel,
+    isExpanded: Boolean,
+    favoriteIds: Set<Long>
+) {
+    AnimatedVisibility(
+        visible = isExpanded,
+        enter = slideInVertically(initialOffsetY = { it }),
+        exit = slideOutVertically(targetOffsetY = { it })
+    ) {
+        val playerState by viewModel.playerUiState.collectAsState()
+        val isCurrentFav = playerState.currentSong?.let { favoriteIds.contains(it.id) } == true
+        NowPlayingScreen(
+            playerState = playerState,
+            isFavorite = isCurrentFav,
+            onCollapse = { viewModel.setNowPlayingExpanded(false) },
+            onTogglePlayPause = { viewModel.playerController.togglePlayPause() },
+            onSkipNext = { viewModel.playerController.skipToNext() },
+            onSkipPrevious = { viewModel.playerController.skipToPrevious() },
+            onSeekTo = { viewModel.playerController.seekTo(it) },
+            onSeekRelative = { viewModel.playerController.seekRelative(it) },
+            onToggleShuffle = { viewModel.playerController.toggleShuffle() },
+            onCycleRepeatMode = { viewModel.playerController.cycleRepeatMode() },
+            onToggleFavorite = {
+                playerState.currentSong?.let { viewModel.toggleFavorite(it.id) }
+            },
+            onRemoveFromQueue = { viewModel.playerController.removeFromQueue(it) },
+            onJumpToQueueItem = { index ->
+                viewModel.playerController.jumpToQueueItem(index)
+            }
+        )
     }
 }
 

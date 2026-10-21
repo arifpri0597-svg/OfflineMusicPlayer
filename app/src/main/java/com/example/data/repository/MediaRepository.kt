@@ -11,14 +11,13 @@ import com.example.data.model.Folder
 import com.example.data.model.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class MediaRepository(private val context: Context) {
 
     private val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
 
     suspend fun queryLocalSongs(): List<Song> = withContext(Dispatchers.IO) {
-        val songsList = mutableListOf<Song>()
+        var songsList = ArrayList<Song>(256)
         val contentResolver = context.contentResolver
 
         val collectionUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -53,6 +52,10 @@ class MediaRepository(private val context: Context) {
                 null,
                 sortOrder
             )?.use { cursor ->
+                val count = cursor.count
+                if (count > 256) {
+                    songsList = ArrayList(count)
+                }
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -84,10 +87,10 @@ class MediaRepository(private val context: Context) {
                     } else null
 
                     val safeTitle = if (rawTitle.isNullOrBlank() || rawTitle == "<unknown>") {
-                        // Extract filename from path if title is missing
                         if (filePath.isNotBlank()) {
-                            val name = File(filePath).nameWithoutExtension
-                            if (name.isNotBlank()) name else "Unknown Title"
+                            val fileName = filePath.substringAfterLast('/')
+                            val nameWithoutExt = fileName.substringBeforeLast('.')
+                            if (nameWithoutExt.isNotBlank()) nameWithoutExt else "Unknown Title"
                         } else "Unknown Title"
                     } else rawTitle.trim()
 
@@ -100,7 +103,9 @@ class MediaRepository(private val context: Context) {
                     } else rawAlbum.trim()
 
                     val folderName = if (filePath.isNotBlank()) {
-                        File(filePath).parentFile?.name ?: "Music"
+                        val parentPath = filePath.substringBeforeLast('/', "")
+                        val parentName = parentPath.substringAfterLast('/')
+                        if (parentName.isNotBlank()) parentName else "Music"
                     } else "Music"
 
                     songsList.add(
@@ -142,20 +147,23 @@ class MediaRepository(private val context: Context) {
                     year = firstSong.year
                 )
             }
-            .sortedBy { it.title.lowercase() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     }
 
     suspend fun queryArtists(songs: List<Song>): List<Artist> = withContext(Dispatchers.Default) {
         songs.groupBy { it.artist }
             .map { (artistName, songGroup) ->
-                val albumCount = songGroup.map { it.album }.distinct().size
+                val distinctAlbums = HashSet<String>()
+                for (song in songGroup) {
+                    distinctAlbums.add(song.album)
+                }
                 Artist(
                     name = artistName,
                     songCount = songGroup.size,
-                    albumCount = albumCount
+                    albumCount = distinctAlbums.size
                 )
             }
-            .sortedBy { it.name.lowercase() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 
     suspend fun queryFolders(songs: List<Song>): List<Folder> = withContext(Dispatchers.Default) {
@@ -163,7 +171,7 @@ class MediaRepository(private val context: Context) {
             .map { (folderName, songGroup) ->
                 val firstPath = songGroup.firstOrNull()?.path ?: ""
                 val parentPath = if (firstPath.isNotBlank()) {
-                    File(firstPath).parent ?: ""
+                    firstPath.substringBeforeLast('/', "")
                 } else ""
                 Folder(
                     name = folderName,
@@ -171,6 +179,6 @@ class MediaRepository(private val context: Context) {
                     songCount = songGroup.size
                 )
             }
-            .sortedBy { it.name.lowercase() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 }

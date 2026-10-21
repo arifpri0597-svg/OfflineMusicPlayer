@@ -1,11 +1,21 @@
 package com.example.data.local
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.data.model.Song
 
-@Entity(tableName = "songs")
+@Entity(
+    tableName = "songs",
+    indices = [
+        Index(value = ["title"]),
+        Index(value = ["artist"]),
+        Index(value = ["album"]),
+        Index(value = ["folderName"])
+    ]
+)
 data class SongEntity(
     @PrimaryKey
     val id: Long,
@@ -69,7 +79,14 @@ data class FavoriteEntity(
     val addedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "history")
+@Immutable
+@Entity(
+    tableName = "history",
+    indices = [
+        Index(value = ["playedAt"]),
+        Index(value = ["songId"])
+    ]
+)
 data class HistoryEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -89,7 +106,11 @@ data class PlaylistEntity(
 
 @Entity(
     tableName = "playlist_songs",
-    primaryKeys = ["playlistId", "songId"]
+    primaryKeys = ["playlistId", "songId"],
+    indices = [
+        Index(value = ["playlistId", "orderIndex"]),
+        Index(value = ["songId"])
+    ]
 )
 data class PlaylistSongCrossRef(
     val playlistId: Long,

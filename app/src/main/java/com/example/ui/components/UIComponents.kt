@@ -53,12 +53,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.Album
 import com.example.data.model.Artist
 import com.example.data.model.Folder
@@ -77,6 +79,7 @@ fun SongItemRow(
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Surface(
         modifier = modifier
@@ -100,8 +103,18 @@ fun SongItemRow(
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
+                    val imageRequest = remember(song.albumArtUri) {
+                        val key = "thumb_${song.albumArtUri}"
+                        ImageRequest.Builder(context)
+                            .data(song.albumArtUri)
+                            .memoryCacheKey(key)
+                            .diskCacheKey(key)
+                            .crossfade(false)
+                            .size(144, 144)
+                            .build()
+                    }
                     AsyncImage(
-                        model = song.albumArtUri,
+                        model = imageRequest,
                         contentDescription = "Album art",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -149,10 +162,7 @@ fun SongItemRow(
             }
 
             // Favorite Button
-            val favColor by animateColorAsState(
-                targetValue = if (isFavorite) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                label = "fav_color"
-            )
+            val favColor = if (isFavorite) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
             IconButton(
                 onClick = onToggleFavorite,
                 modifier = Modifier.testTag("fav_btn_${song.id}")
@@ -216,6 +226,7 @@ fun AlbumCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -233,8 +244,18 @@ fun AlbumCard(
                 contentAlignment = Alignment.Center
             ) {
                 if (album.artworkUri != null) {
+                    val imageRequest = remember(album.artworkUri) {
+                        val key = "album_card_${album.artworkUri}"
+                        ImageRequest.Builder(context)
+                            .data(album.artworkUri)
+                            .memoryCacheKey(key)
+                            .diskCacheKey(key)
+                            .crossfade(false)
+                            .size(300, 300)
+                            .build()
+                    }
                     AsyncImage(
-                        model = album.artworkUri,
+                        model = imageRequest,
                         contentDescription = album.title,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop

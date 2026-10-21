@@ -1,6 +1,8 @@
 package com.example.viewmodel
 
 import android.app.Application
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.PulseMusicApp
@@ -18,10 +20,15 @@ import com.example.player.MusicPlayerController
 import com.example.player.PlayerUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -37,6 +44,7 @@ enum class NavigationTab {
     SETTINGS
 }
 
+@Immutable
 data class LibraryUiState(
     val isLoading: Boolean = false,
     val songs: List<Song> = emptyList(),
@@ -61,6 +69,7 @@ data class LibraryUiState(
     val userThemePreference: String = "system"
 )
 
+@Stable
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as PulseMusicApp
@@ -82,6 +91,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val libraryState: StateFlow<LibraryUiState> = _libraryState.asStateFlow()
 
     private var playlistSongsJob: Job? = null
+    private var scanJob: Job? = null
+    private var hasPerformedInitialScan = false
+    private var lastGroupedSongIds: List<Long> = emptyList()
 
     init {
         observeSongsFromDatabase()
@@ -91,18 +103,33 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun observeSongsFromDatabase() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             audioScanRepository.getSongsFlow().collect { songsList ->
-                val albums = audioScanRepository.getAlbums(songsList)
-                val artists = audioScanRepository.getArtists(songsList)
-                val folders = audioScanRepository.getFolders(songsList)
-                _libraryState.update { state ->
-                    state.copy(
-                        songs = songsList,
-                        albums = albums,
-                        artists = artists,
-                        folders = folders
-                    )
+                val currentSongIds = songsList.map { it.id }
+                if (currentSongIds != lastGroupedSongIds || (songsList.isEmpty() && _libraryState.value.albums.isNotEmpty())) {
+                    lastGroupedSongIds = currentSongIds
+                    coroutineScope {
+                        val albumsDeferred = async { audioScanRepository.getAlbums(songsList) }
+                        val artistsDeferred = async { audioScanRepository.getArtists(songsList) }
+                        val foldersDeferred = async { audioScanRepository.getFolders(songsList) }
+                        launch { playerController.prewarmMediaItems(songsList) }
+
+                        val albums = albumsDeferred.await()
+                        val artists = artistsDeferred.await()
+                        val folders = foldersDeferred.await()
+                        _libraryState.update { state ->
+                            state.copy(
+                                songs = songsList,
+                                albums = albums,
+                                artists = artists,
+                                folders = folders
+                            )
+                        }
+                    }
+                } else {
+                    _libraryState.update { state ->
+                        state.copy(songs = songsList)
+                    }
                 }
             }
         }
@@ -110,43 +137,60 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observeFavoritesAndHistory() {
         viewModelScope.launch {
-            musicDao.getAllFavoriteIds().collect { favList ->
-                _libraryState.update { it.copy(favoriteIds = favList.toSet()) }
-            }
+            musicDao.getAllFavoriteIds()
+                .distinctUntilChanged()
+                .map { it.toHashSet() }
+                .flowOn(Dispatchers.Default)
+                .collect { favSet ->
+                    _libraryState.update { it.copy(favoriteIds = favSet) }
+                }
         }
         viewModelScope.launch {
-            musicDao.getHistory().collect { historyList ->
-                _libraryState.update { it.copy(historyItems = historyList) }
-            }
+            musicDao.getHistory()
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.Default)
+                .collect { historyList ->
+                    _libraryState.update { it.copy(historyItems = historyList) }
+                }
         }
     }
 
     private fun observePlaylists() {
         viewModelScope.launch {
-            musicDao.getPlaylistsWithTrackCount().collect { playlistsWithCount ->
-                val list = playlistsWithCount.map { it.toPlaylist() }
-                _libraryState.update { it.copy(playlists = list) }
-            }
+            musicDao.getPlaylistsWithTrackCount()
+                .distinctUntilChanged()
+                .map { list -> list.map { it.toPlaylist() } }
+                .flowOn(Dispatchers.Default)
+                .collect { playlists ->
+                    _libraryState.update { it.copy(playlists = playlists) }
+                }
         }
     }
 
     private fun observePreferences() {
         viewModelScope.launch {
-            userPrefs.themeMode.collect { mode ->
-                _libraryState.update { it.copy(userThemePreference = mode) }
-            }
+            userPrefs.themeMode
+                .distinctUntilChanged()
+                .collect { mode ->
+                    _libraryState.update { it.copy(userThemePreference = mode) }
+                }
         }
     }
 
     fun onPermissionResult(isGranted: Boolean) {
-        _libraryState.update { it.copy(hasPermission = isGranted) }
-        if (isGranted) {
+        val wasGranted = _libraryState.value.hasPermission
+        if (wasGranted != isGranted) {
+            _libraryState.update { it.copy(hasPermission = isGranted) }
+        }
+        if (isGranted && (!hasPerformedInitialScan || !wasGranted)) {
+            hasPerformedInitialScan = true
             refreshLibrary()
         }
     }
 
     fun refreshLibrary() {
-        viewModelScope.launch(Dispatchers.IO) {
+        if (scanJob?.isActive == true) return
+        scanJob = viewModelScope.launch(Dispatchers.IO) {
             _libraryState.update { it.copy(isLoading = true) }
             try {
                 audioScanRepository.scanAndSyncDeviceAudio()
@@ -160,13 +204,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setNavigationTab(tab: NavigationTab) {
         _libraryState.update {
-            it.copy(
-                selectedTab = tab,
-                selectedAlbum = null,
-                selectedArtist = null,
-                selectedFolder = null,
-                selectedPlaylist = null
-            )
+            if (it.selectedTab == tab &&
+                it.selectedAlbum == null &&
+                it.selectedArtist == null &&
+                it.selectedFolder == null &&
+                it.selectedPlaylist == null
+            ) {
+                it
+            } else {
+                it.copy(
+                    selectedTab = tab,
+                    selectedAlbum = null,
+                    selectedArtist = null,
+                    selectedFolder = null,
+                    selectedPlaylist = null
+                )
+            }
         }
     }
 
@@ -196,14 +249,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playlistSongsJob?.cancel()
         playlistSongsJob = viewModelScope.launch {
             combine(
-                musicDao.getSongsForPlaylist(playlistId),
-                musicDao.getAllFavoriteIds()
+                musicDao.getSongsForPlaylist(playlistId).distinctUntilChanged(),
+                musicDao.getAllFavoriteIds().distinctUntilChanged()
             ) { entities, favIds ->
-                val favSet = favIds.toSet()
+                val favSet = favIds.toHashSet()
                 entities.map { it.toDomainSong(isFavorite = favSet.contains(it.id)) }
-            }.collect { domainSongs ->
-                _libraryState.update { it.copy(selectedPlaylistSongs = domainSongs) }
             }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.Default)
+                .collect { domainSongs ->
+                    _libraryState.update { it.copy(selectedPlaylistSongs = domainSongs) }
+                }
         }
     }
 
@@ -227,8 +283,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deletePlaylist(playlistId: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            musicDao.deletePlaylist(playlistId)
-            musicDao.deletePlaylistSongs(playlistId)
+            musicDao.deletePlaylistWithSongs(playlistId)
             if (_libraryState.value.selectedPlaylist?.id == playlistId) {
                 _libraryState.update { it.copy(selectedPlaylist = null, selectedPlaylistSongs = emptyList()) }
             }
@@ -251,9 +306,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (songIds.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             var currentCount = musicDao.getPlaylistTrackCount(playlistId)
-            for (id in songIds) {
-                musicDao.addSongToPlaylist(PlaylistSongCrossRef(playlistId = playlistId, songId = id, orderIndex = currentCount++))
+            val crossRefs = songIds.map { id ->
+                PlaylistSongCrossRef(playlistId = playlistId, songId = id, orderIndex = currentCount++)
             }
+            musicDao.addSongsToPlaylist(crossRefs)
         }
     }
 

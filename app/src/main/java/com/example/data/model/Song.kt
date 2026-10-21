@@ -1,7 +1,9 @@
 package com.example.data.model
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 
+@Immutable
 data class Song(
     val id: Long,
     val title: String,
@@ -18,12 +20,15 @@ data class Song(
     val path: String = "",
     val isFavorite: Boolean = false
 ) {
-    val formattedDuration: String
-        get() {
-            if (durationMs <= 0) return "--:--"
-            val totalSeconds = durationMs / 1000
-            val minutes = totalSeconds / 60
-            val seconds = totalSeconds % 60
-            return String.format("%d:%02d", minutes, seconds)
+    val formattedDuration: String = formatDurationMs(durationMs)
+
+    companion object {
+        fun formatDurationMs(durationMs: Long): String {
+            if (durationMs <= 0L) return "--:--"
+            val totalSeconds = durationMs / 1000L
+            val minutes = totalSeconds / 60L
+            val seconds = totalSeconds % 60L
+            return if (seconds < 10L) "$minutes:0$seconds" else "$minutes:$seconds"
         }
+    }
 }

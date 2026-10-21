@@ -2,6 +2,7 @@ package com.example.player
 
 import android.content.ComponentName
 import android.content.Context
+import androidx.compose.runtime.Stable
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 
+@Stable
 class MusicPlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -38,6 +40,7 @@ class MusicPlayerController(
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
     private var activeQueue: MutableList<Song> = mutableListOf()
+    private var immutableQueue: List<Song> = emptyList()
     private var pendingPlayRequest: Pair<List<Song>, Int>? = null
     private var lastRecordedSongId: Long? = null
 
@@ -131,6 +134,16 @@ class MusicPlayerController(
         }, ContextCompat.getMainExecutor(context))
     }
 
+    private fun isSameQueue(songs: List<Song>): Boolean {
+        if (activeQueue.size != songs.size) return false
+        for (i in songs.indices) {
+            if (activeQueue[i].id != songs[i].id || activeQueue[i].contentUri != songs[i].contentUri) {
+                return false
+            }
+        }
+        return true
+    }
+
     fun playQueue(songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
         val safeIndex = startIndex.coerceIn(0, songs.size - 1)
@@ -138,29 +151,41 @@ class MusicPlayerController(
         if (player == null) {
             pendingPlayRequest = songs to safeIndex
             activeQueue = songs.toMutableList()
+            immutableQueue = activeQueue.toList()
             _uiState.update {
                 it.copy(
-                    queue = activeQueue.toList(),
+                    queue = immutableQueue,
                     currentIndex = safeIndex,
-                    currentSong = activeQueue.getOrNull(safeIndex)
+                    currentSong = immutableQueue.getOrNull(safeIndex)
                 )
             }
             return
         }
 
-        activeQueue = songs.toMutableList()
-        val mediaItems = songs.map { songToMediaItem(it) }
+        if (player.mediaItemCount == songs.size && isSameQueue(songs) && player.playbackState != Player.STATE_IDLE) {
+            player.seekTo(safeIndex, 0L)
+            player.play()
+        } else {
+            activeQueue = songs.toMutableList()
+            immutableQueue = activeQueue.toList()
+            val mediaItems = ArrayList<MediaItem>(songs.size)
+            for (song in songs) {
+                mediaItems.add(songToMediaItem(song))
+            }
 
-        player.setMediaItems(mediaItems, safeIndex, 0L)
-        player.prepare()
-        player.play()
+            player.setMediaItems(mediaItems, safeIndex, 0L)
+            player.prepare()
+            player.play()
+        }
 
-        val targetSong = activeQueue.getOrNull(safeIndex)
+        val targetSong = immutableQueue.getOrNull(safeIndex)
         _uiState.update {
             it.copy(
-                queue = activeQueue.toList(),
+                queue = immutableQueue,
                 currentIndex = safeIndex,
-                currentSong = targetSong
+                currentSong = targetSong,
+                positionMs = 0L,
+                durationMs = targetSong?.durationMs ?: it.durationMs
             )
         }
         if (targetSong != null && targetSong.id != lastRecordedSongId) {
@@ -250,8 +275,9 @@ class MusicPlayerController(
         }
         val player = controller ?: return
         activeQueue.add(song)
+        immutableQueue = activeQueue.toList()
         player.addMediaItem(songToMediaItem(song))
-        _uiState.update { it.copy(queue = activeQueue.toList()) }
+        _uiState.update { it.copy(queue = immutableQueue) }
     }
 
     fun playNext(song: Song) {
@@ -262,16 +288,18 @@ class MusicPlayerController(
         val player = controller ?: return
         val nextIndex = (player.currentMediaItemIndex + 1).coerceIn(0, activeQueue.size)
         activeQueue.add(nextIndex, song)
+        immutableQueue = activeQueue.toList()
         player.addMediaItem(nextIndex, songToMediaItem(song))
-        _uiState.update { it.copy(queue = activeQueue.toList()) }
+        _uiState.update { it.copy(queue = immutableQueue) }
     }
 
     fun removeFromQueue(index: Int) {
         val player = controller ?: return
         if (index in activeQueue.indices) {
             activeQueue.removeAt(index)
+            immutableQueue = activeQueue.toList()
             player.removeMediaItem(index)
-            _uiState.update { it.copy(queue = activeQueue.toList()) }
+            _uiState.update { it.copy(queue = immutableQueue) }
         }
     }
 
@@ -287,7 +315,23 @@ class MusicPlayerController(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    private val mediaItemCache = java.util.concurrent.ConcurrentHashMap<Long, MediaItem>()
+
+    fun prewarmMediaItems(songs: List<Song>) {
+        if (mediaItemCache.size > songs.size * 2 + 64) {
+            mediaItemCache.clear()
+        }
+        for (song in songs) {
+            songToMediaItem(song)
+        }
+    }
+
     private fun songToMediaItem(song: Song): MediaItem {
+        mediaItemCache[song.id]?.let { cached ->
+            if (cached.localConfiguration?.uri == song.contentUri) {
+                return cached
+            }
+        }
         val metadata = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
@@ -300,12 +344,13 @@ class MusicPlayerController(
             .setUri(song.contentUri)
             .setMediaMetadata(metadata)
             .build()
+            .also { mediaItemCache[song.id] = it }
     }
 
     private fun syncStateFromPlayer() {
         val player = controller ?: return
         val currentIndex = player.currentMediaItemIndex
-        val currentSong = if (currentIndex in activeQueue.indices) activeQueue[currentIndex] else null
+        val currentSong = if (currentIndex in immutableQueue.indices) immutableQueue[currentIndex] else null
         val duration = max(0L, player.duration)
         val position = max(0L, player.currentPosition)
 
@@ -324,7 +369,7 @@ class MusicPlayerController(
                 durationMs = duration,
                 isShuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = repeat,
-                queue = activeQueue.toList()
+                queue = immutableQueue
             )
         }
 
@@ -342,7 +387,13 @@ class MusicPlayerController(
                 if (player != null && player.isPlaying) {
                     val pos = max(0L, player.currentPosition)
                     val dur = max(0L, player.duration)
-                    _uiState.update { it.copy(positionMs = pos, durationMs = dur) }
+                    _uiState.update { current ->
+                        if (current.positionMs / 250L == pos / 250L && current.durationMs == dur) {
+                            current
+                        } else {
+                            current.copy(positionMs = pos, durationMs = dur)
+                        }
+                    }
                 }
                 delay(500)
             }

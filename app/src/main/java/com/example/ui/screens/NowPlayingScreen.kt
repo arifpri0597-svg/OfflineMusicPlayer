@@ -69,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.RepeatMode
 import com.example.player.PlayerUiState
 
@@ -106,6 +108,7 @@ fun NowPlayingScreen(
     var showQueueSheet by remember { mutableStateOf(false) }
 
     val song = playerState.currentSong ?: return
+    val context = LocalContext.current
 
     Surface(
         modifier = modifier
@@ -195,8 +198,18 @@ fun NowPlayingScreen(
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
+                    val heroImageRequest = remember(song.albumArtUri) {
+                        val key = "hero_${song.albumArtUri}"
+                        ImageRequest.Builder(context)
+                            .data(song.albumArtUri)
+                            .memoryCacheKey(key)
+                            .diskCacheKey(key)
+                            .crossfade(false)
+                            .size(600, 600)
+                            .build()
+                    }
                     AsyncImage(
-                        model = song.albumArtUri,
+                        model = heroImageRequest,
                         contentDescription = "Album art",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -467,7 +480,11 @@ fun NowPlayingScreen(
                                 .fillMaxWidth()
                                 .height(380.dp)
                         ) {
-                            itemsIndexed(playerState.queue) { index, itemSong ->
+                            itemsIndexed(
+                                items = playerState.queue,
+                                key = { index, itemSong -> "${itemSong.id}_$index" },
+                                contentType = { _, _ -> "queue_item" }
+                            ) { index, itemSong ->
                                 val isCurrent = index == playerState.currentIndex
                                 Surface(
                                     modifier = Modifier

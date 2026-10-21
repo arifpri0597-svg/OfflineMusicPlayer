@@ -63,11 +63,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.Song
 import com.example.data.model.SortOrder
 import com.example.ui.components.EmptyStateView
@@ -98,21 +100,21 @@ fun ScannedAudioListScreen(
 
     val filteredAndSortedSongs by remember(songs, searchQuery, selectedSortOrder) {
         derivedStateOf {
-            val query = searchQuery.trim().lowercase()
+            val query = searchQuery.trim()
             val filtered = if (query.isEmpty()) {
                 songs
             } else {
                 songs.filter { song ->
-                    song.title.lowercase().contains(query) ||
-                    song.artist.lowercase().contains(query) ||
-                    song.album.lowercase().contains(query) ||
-                    song.folderName.lowercase().contains(query)
+                    song.title.contains(query, ignoreCase = true) ||
+                    song.artist.contains(query, ignoreCase = true) ||
+                    song.album.contains(query, ignoreCase = true) ||
+                    song.folderName.contains(query, ignoreCase = true)
                 }
             }
 
             when (selectedSortOrder) {
-                SortOrder.TITLE_ASC -> filtered.sortedBy { it.title.lowercase() }
-                SortOrder.ARTIST_ASC -> filtered.sortedBy { it.artist.lowercase() }
+                SortOrder.TITLE_ASC -> filtered
+                SortOrder.ARTIST_ASC -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
                 SortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
                 SortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAdded }
             }
@@ -324,7 +326,8 @@ fun ScannedAudioListScreen(
                     // Scanned Audio Song Items in LazyColumn
                     items(
                         items = filteredAndSortedSongs,
-                        key = { it.id }
+                        key = { it.id },
+                        contentType = { "scanned_song" }
                     ) { song ->
                         val isCurrentPlaying = isPlaying && currentPlayingSongId == song.id
                         val isFavorite = favoriteIds.contains(song.id)
@@ -362,6 +365,7 @@ private fun ScannedAudioItemRow(
     modifier: Modifier = Modifier
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Surface(
         modifier = modifier
@@ -389,8 +393,18 @@ private fun ScannedAudioItemRow(
                 contentAlignment = Alignment.Center
             ) {
                 if (song.albumArtUri != null) {
+                    val imageRequest = remember(song.albumArtUri) {
+                        val key = "thumb_${song.albumArtUri}"
+                        ImageRequest.Builder(context)
+                            .data(song.albumArtUri)
+                            .memoryCacheKey(key)
+                            .diskCacheKey(key)
+                            .crossfade(false)
+                            .size(144, 144)
+                            .build()
+                    }
                     AsyncImage(
-                        model = song.albumArtUri,
+                        model = imageRequest,
                         contentDescription = "Cover for ${song.title}",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop

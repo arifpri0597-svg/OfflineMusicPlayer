@@ -16,9 +16,10 @@ import com.example.data.model.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * Repository that queries the Android MediaStore API to scan local audio files
@@ -38,7 +39,7 @@ class AudioScanRepository(
      * @return List of newly mapped SongEntity items stored in the local database.
      */
     suspend fun scanAndSyncDeviceAudio(): List<SongEntity> = withContext(Dispatchers.IO) {
-        val scannedEntities = mutableListOf<SongEntity>()
+        var scannedEntities = ArrayList<SongEntity>(256)
         val contentResolver: ContentResolver = context.contentResolver
 
         val collectionUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -73,6 +74,10 @@ class AudioScanRepository(
                 null,
                 sortOrder
             )?.use { cursor ->
+                val count = cursor.count
+                if (count > 256) {
+                    scannedEntities = ArrayList(count)
+                }
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -105,21 +110,8 @@ class AudioScanRepository(
                 }
             }
 
-            // Sync with local Room database:
-            // 1. Insert or update all scanned songs in local database in safe chunks
-            if (scannedEntities.isNotEmpty()) {
-                val existingIds = musicDao.getAllCachedSongIds()
-                val activeIdSet = scannedEntities.mapTo(HashSet()) { it.id }
-                val staleIds = existingIds.filter { !activeIdSet.contains(it) }
-                staleIds.chunked(500).forEach { chunk ->
-                    musicDao.deleteSongsByIds(chunk)
-                }
-                scannedEntities.chunked(500).forEach { chunk ->
-                    musicDao.insertSongs(chunk)
-                }
-            } else {
-                musicDao.clearSongs()
-            }
+            // Atomically sync with local Room database in a single transaction on Dispatchers.IO
+            musicDao.syncScannedSongs(scannedEntities)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -128,7 +120,8 @@ class AudioScanRepository(
     }
 
     /**
-     * Maps a single MediaStore Cursor row to our Room local database SongEntity schema.
+     * Maps a single MediaStore Cursor row to our Room local database SongEntity schema
+     * without allocating File objects in the hot loop.
      */
     private fun mapCursorToSongEntity(
         cursor: Cursor,
@@ -164,8 +157,9 @@ class AudioScanRepository(
 
         val safeTitle = if (rawTitle.isNullOrBlank() || rawTitle == "<unknown>") {
             if (filePath.isNotBlank()) {
-                val name = File(filePath).nameWithoutExtension
-                if (name.isNotBlank()) name else "Unknown Title"
+                val fileName = filePath.substringAfterLast('/')
+                val nameWithoutExt = fileName.substringBeforeLast('.')
+                if (nameWithoutExt.isNotBlank()) nameWithoutExt else "Unknown Title"
             } else "Unknown Title"
         } else rawTitle.trim()
 
@@ -178,7 +172,9 @@ class AudioScanRepository(
         } else rawAlbum.trim()
 
         val folderName = if (filePath.isNotBlank()) {
-            File(filePath).parentFile?.name ?: "Music"
+            val parentPath = filePath.substringBeforeLast('/', "")
+            val parentName = parentPath.substringAfterLast('/')
+            if (parentName.isNotBlank()) parentName else "Music"
         } else "Music"
 
         return SongEntity(
@@ -198,24 +194,43 @@ class AudioScanRepository(
         )
     }
 
+    private val domainSongCache = java.util.concurrent.ConcurrentHashMap<SongEntity, Song>()
+
     /**
      * Returns a reactive Flow of domain Song objects loaded directly from the local Room database,
-     * combined with the user's favorites state.
+     * combined with the user's favorites state on Dispatchers.Default.
      */
     fun getSongsFlow(): Flow<List<Song>> {
-        return combine(
-            musicDao.getAllCachedSongs(),
-            musicDao.getAllFavoriteIds()
-        ) { songEntities, favIds ->
-            val favSet = favIds.toSet()
-            songEntities.map { entity ->
-                entity.toDomainSong(isFavorite = favSet.contains(entity.id))
+        val baseSongsFlow = musicDao.getAllCachedSongs()
+            .distinctUntilChanged()
+            .map { songEntities ->
+                if (domainSongCache.size > songEntities.size * 2 + 64) {
+                    domainSongCache.clear()
+                }
+                songEntities.map { entity ->
+                    domainSongCache.getOrPut(entity) { entity.toDomainSong(isFavorite = false) }
+                }
             }
-        }.flowOn(Dispatchers.Default)
+        val favIdsFlow = musicDao.getAllFavoriteIds()
+            .distinctUntilChanged()
+            .map { it.toHashSet() }
+
+        return combine(baseSongsFlow, favIdsFlow) { baseSongs, favSet ->
+            if (favSet.isEmpty()) {
+                baseSongs
+            } else {
+                baseSongs.map { song ->
+                    val isFav = favSet.contains(song.id)
+                    if (song.isFavorite == isFav) song else song.copy(isFavorite = isFav)
+                }
+            }
+        }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
     }
 
     /**
-     * Extracts distinct Album groupings from a list of domain songs.
+     * Extracts distinct Album groupings from a list of domain songs on a background thread.
      */
     suspend fun getAlbums(songs: List<Song>): List<Album> = withContext(Dispatchers.Default) {
         songs.groupBy { it.album }
@@ -230,34 +245,37 @@ class AudioScanRepository(
                     year = firstSong.year
                 )
             }
-            .sortedBy { it.title.lowercase() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     }
 
     /**
-     * Extracts distinct Artist groupings from a list of domain songs.
+     * Extracts distinct Artist groupings from a list of domain songs on a background thread.
      */
     suspend fun getArtists(songs: List<Song>): List<Artist> = withContext(Dispatchers.Default) {
         songs.groupBy { it.artist }
             .map { (artistName, songGroup) ->
-                val albumCount = songGroup.map { it.album }.distinct().size
+                val distinctAlbums = HashSet<String>()
+                for (song in songGroup) {
+                    distinctAlbums.add(song.album)
+                }
                 Artist(
                     name = artistName,
                     songCount = songGroup.size,
-                    albumCount = albumCount
+                    albumCount = distinctAlbums.size
                 )
             }
-            .sortedBy { it.name.lowercase() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 
     /**
-     * Extracts distinct Folder groupings from a list of domain songs.
+     * Extracts distinct Folder groupings from a list of domain songs on a background thread.
      */
     suspend fun getFolders(songs: List<Song>): List<Folder> = withContext(Dispatchers.Default) {
         songs.groupBy { it.folderName }
             .map { (folderName, songGroup) ->
                 val firstPath = songGroup.firstOrNull()?.path ?: ""
                 val parentPath = if (firstPath.isNotBlank()) {
-                    File(firstPath).parent ?: ""
+                    firstPath.substringBeforeLast('/', "")
                 } else ""
                 Folder(
                     name = folderName,
@@ -265,6 +283,6 @@ class AudioScanRepository(
                     songCount = songGroup.size
                 )
             }
-            .sortedBy { it.name.lowercase() }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 }

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -15,6 +16,9 @@ interface MusicDao {
 
     @Query("SELECT * FROM songs ORDER BY title COLLATE NOCASE ASC")
     fun getAllCachedSongs(): Flow<List<SongEntity>>
+
+    @Query("SELECT * FROM songs")
+    suspend fun getAllCachedSongsSnapshot(): List<SongEntity>
 
     @Query("SELECT * FROM songs WHERE id = :id LIMIT 1")
     suspend fun getSongById(id: Long): SongEntity?
@@ -30,6 +34,55 @@ interface MusicDao {
 
     @Query("DELETE FROM songs")
     suspend fun clearSongs()
+
+    /**
+     * Atomically syncs scanned MediaStore entities with the Room cache in a single transaction,
+     * only deleting removed rows and upserting new or modified rows to avoid redundant index rewrites
+     * and unnecessary Flow emissions.
+     */
+    @Transaction
+    suspend fun syncScannedSongs(scannedEntities: List<SongEntity>) {
+        if (scannedEntities.isEmpty()) {
+            clearSongs()
+            return
+        }
+        val existingSongs = getAllCachedSongsSnapshot()
+        val existingById = HashMap<Long, SongEntity>(existingSongs.size)
+        for (song in existingSongs) {
+            existingById[song.id] = song
+        }
+
+        val activeIdSet = HashSet<Long>(scannedEntities.size)
+        val toUpsert = ArrayList<SongEntity>()
+
+        for (entity in scannedEntities) {
+            activeIdSet.add(entity.id)
+            val existing = existingById[entity.id]
+            if (existing != entity) {
+                toUpsert.add(entity)
+            }
+        }
+
+        if (existingSongs.isNotEmpty()) {
+            val staleIds = ArrayList<Long>()
+            for (existing in existingSongs) {
+                if (!activeIdSet.contains(existing.id)) {
+                    staleIds.add(existing.id)
+                }
+            }
+            if (staleIds.isNotEmpty()) {
+                staleIds.chunked(500).forEach { chunk ->
+                    deleteSongsByIds(chunk)
+                }
+            }
+        }
+
+        if (toUpsert.isNotEmpty()) {
+            toUpsert.chunked(500).forEach { chunk ->
+                insertSongs(chunk)
+            }
+        }
+    }
 
     // Favorites
     @Query("SELECT songId FROM favorites ORDER BY addedAt DESC")
@@ -90,11 +143,20 @@ interface MusicDao {
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun deletePlaylistSongs(playlistId: Long)
 
+    @Transaction
+    suspend fun deletePlaylistWithSongs(playlistId: Long) {
+        deletePlaylistSongs(playlistId)
+        deletePlaylist(playlistId)
+    }
+
     @Query("SELECT songId FROM playlist_songs WHERE playlistId = :playlistId ORDER BY orderIndex ASC")
     fun getSongIdsForPlaylist(playlistId: Long): Flow<List<Long>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addSongToPlaylist(crossRef: PlaylistSongCrossRef)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun addSongsToPlaylist(crossRefs: List<PlaylistSongCrossRef>)
 
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: Long)

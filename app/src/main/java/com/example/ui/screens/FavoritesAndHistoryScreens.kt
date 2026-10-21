@@ -127,7 +127,11 @@ fun FavoritesScreen(
                 }
             }
 
-            items(favoriteSongs, key = { it.id }) { song ->
+            items(
+                items = favoriteSongs,
+                key = { it.id },
+                contentType = { "favorite_song" }
+            ) { song ->
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
@@ -205,7 +209,11 @@ fun HistoryScreen(
                 }
             }
 
-            items(recentSongs) { song ->
+            items(
+                items = recentSongs,
+                key = { it.id },
+                contentType = { "history_song" }
+            ) { song ->
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,

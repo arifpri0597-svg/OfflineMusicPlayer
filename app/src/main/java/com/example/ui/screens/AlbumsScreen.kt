@@ -39,11 +39,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.Album
 import com.example.data.model.Song
 import com.example.ui.components.AlbumCard
@@ -68,6 +70,7 @@ fun AlbumsScreen(
     onAddToPlaylist: (Song) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     if (selectedAlbum != null) {
         BackHandler {
             onAlbumSelect(null)
@@ -113,8 +116,18 @@ fun AlbumsScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             if (selectedAlbum.artworkUri != null) {
+                                val imageRequest = remember(selectedAlbum.artworkUri) {
+                                    val key = "album_card_${selectedAlbum.artworkUri}"
+                                    ImageRequest.Builder(context)
+                                        .data(selectedAlbum.artworkUri)
+                                        .memoryCacheKey(key)
+                                        .diskCacheKey(key)
+                                        .crossfade(false)
+                                        .size(300, 300)
+                                        .build()
+                                }
                                 AsyncImage(
-                                    model = selectedAlbum.artworkUri,
+                                    model = imageRequest,
                                     contentDescription = selectedAlbum.title,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
@@ -183,7 +196,11 @@ fun AlbumsScreen(
                 }
             }
 
-            items(albumSongs) { song ->
+            items(
+                items = albumSongs,
+                key = { it.id },
+                contentType = { "album_song" }
+            ) { song ->
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
@@ -214,7 +231,11 @@ fun AlbumsScreen(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(albums, key = { it.id }) { album ->
+                items(
+                    items = albums,
+                    key = { it.id },
+                    contentType = { "album_card" }
+                ) { album ->
                     AlbumCard(
                         album = album,
                         onClick = { onAlbumSelect(album) }

@@ -242,7 +242,11 @@ fun PlaylistsScreen(
                     )
                 }
             } else {
-                items(playlistSongs, key = { it.id }) { song ->
+                items(
+                    items = playlistSongs,
+                    key = { it.id },
+                    contentType = { "playlist_song" }
+                ) { song ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -352,7 +356,11 @@ fun PlaylistsScreen(
                         }
                     }
 
-                    items(playlists, key = { it.id }) { playlist ->
+                    items(
+                        items = playlists,
+                        key = { it.id },
+                        contentType = { "playlist_card" }
+                    ) { playlist ->
                         PlaylistItemCard(
                             playlist = playlist,
                             onClick = { onPlaylistSelect(playlist) },
@@ -727,7 +735,11 @@ fun AddTracksToPlaylistDialog(
                             .fillMaxWidth()
                             .heightIn(max = 300.dp)
                     ) {
-                        items(filteredSongs, key = { it.id }) { song ->
+                        items(
+                            items = filteredSongs,
+                            key = { it.id },
+                            contentType = { "selectable_song" }
+                        ) { song ->
                             val isChecked = selectedIds.contains(song.id)
                             Row(
                                 modifier = Modifier

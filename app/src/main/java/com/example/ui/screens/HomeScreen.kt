@@ -80,6 +80,14 @@ fun HomeScreen(
         return
     }
 
+    val recentPreview = androidx.compose.runtime.remember(recentSongs) { recentSongs.take(10) }
+    val albumsPreview = androidx.compose.runtime.remember(albums) { albums.take(8) }
+    val favoritesPreview = androidx.compose.runtime.remember(favoriteSongs) { favoriteSongs.take(5) }
+    val allTracksPreview = androidx.compose.runtime.remember(songs) { songs.take(10) }
+    val favoriteIdSet = androidx.compose.runtime.remember(favoriteSongs) {
+        favoriteSongs.mapTo(HashSet(favoriteSongs.size)) { it.id }
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -87,7 +95,7 @@ fun HomeScreen(
         contentPadding = PaddingValues(bottom = 96.dp)
     ) {
         // Welcome Header & Quick Actions
-        item {
+        item(key = "home_header", contentType = "header") {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -145,8 +153,8 @@ fun HomeScreen(
         }
 
         // Recently Played Section (if any)
-        if (recentSongs.isNotEmpty()) {
-            item {
+        if (recentPreview.isNotEmpty()) {
+            item(key = "home_recent_section", contentType = "carousel") {
                 Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Row(
                         modifier = Modifier
@@ -172,7 +180,11 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(recentSongs.take(10)) { song ->
+                        items(
+                            items = recentPreview,
+                            key = { it.id },
+                            contentType = { "recent_card" }
+                        ) { song ->
                             RecentSongCard(
                                 song = song,
                                 isPlaying = isPlaying && currentSongId == song.id,
@@ -185,8 +197,8 @@ fun HomeScreen(
         }
 
         // Albums Carousel
-        if (albums.isNotEmpty()) {
-            item {
+        if (albumsPreview.isNotEmpty()) {
+            item(key = "home_albums_section", contentType = "carousel") {
                 Column(modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
                     Text(
                         text = "Albums",
@@ -199,7 +211,11 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        items(albums.take(8)) { album ->
+                        items(
+                            items = albumsPreview,
+                            key = { it.id },
+                            contentType = { "album_card" }
+                        ) { album ->
                             HomeAlbumCard(
                                 album = album,
                                 onClick = { onAlbumClick(album) }
@@ -211,8 +227,8 @@ fun HomeScreen(
         }
 
         // Favorites Preview (if any)
-        if (favoriteSongs.isNotEmpty()) {
-            item {
+        if (favoritesPreview.isNotEmpty()) {
+            item(key = "home_favorites_header", contentType = "section_header") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -234,7 +250,11 @@ fun HomeScreen(
                 }
             }
 
-            items(favoriteSongs.take(5)) { song ->
+            items(
+                items = favoritesPreview,
+                key = { "fav_${it.id}" },
+                contentType = { "song_row" }
+            ) { song ->
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
@@ -249,7 +269,7 @@ fun HomeScreen(
         }
 
         // Quick Songs list preview
-        item {
+        item(key = "home_all_tracks_header", contentType = "section_header") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -272,11 +292,15 @@ fun HomeScreen(
             }
         }
 
-        items(songs.take(10)) { song ->
+        items(
+            items = allTracksPreview,
+            key = { "all_${it.id}" },
+            contentType = { "song_row" }
+        ) { song ->
             SongItemRow(
                 song = song,
                 isPlaying = isPlaying && currentSongId == song.id,
-                isFavorite = favoriteSongs.any { it.id == song.id },
+                isFavorite = song.isFavorite || favoriteIdSet.contains(song.id),
                 onSongClick = { onSongClick(song, songs) },
                 onToggleFavorite = { onToggleFavorite(song.id) },
                 onPlayNext = { onPlayNext(song) },

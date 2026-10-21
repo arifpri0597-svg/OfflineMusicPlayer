@@ -121,7 +121,11 @@ fun ArtistsScreen(
                 }
             }
 
-            items(artistSongs) { song ->
+            items(
+                items = artistSongs,
+                key = { it.id },
+                contentType = { "artist_song" }
+            ) { song ->
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
@@ -149,7 +153,11 @@ fun ArtistsScreen(
                     .testTag("artists_list"),
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
-                items(artists, key = { it.name }) { artist ->
+                items(
+                    items = artists,
+                    key = { it.name },
+                    contentType = { "artist_row" }
+                ) { artist ->
                     ArtistItemRow(
                         artist = artist,
                         onClick = { onArtistSelect(artist) }
@@ -239,7 +247,11 @@ fun FoldersScreen(
                 }
             }
 
-            items(folderSongs) { song ->
+            items(
+                items = folderSongs,
+                key = { it.id },
+                contentType = { "folder_song" }
+            ) { song ->
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
@@ -267,7 +279,11 @@ fun FoldersScreen(
                     .testTag("folders_list"),
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
-                items(folders, key = { it.path }) { folder ->
+                items(
+                    items = folders,
+                    key = { it.path },
+                    contentType = { "folder_row" }
+                ) { folder ->
                     FolderItemRow(
                         folder = folder,
                         onClick = { onFolderSelect(folder) }

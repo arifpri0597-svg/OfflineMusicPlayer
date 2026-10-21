@@ -1,8 +1,10 @@
 package com.example.player
 
+import androidx.compose.runtime.Immutable
 import com.example.data.model.RepeatMode
 import com.example.data.model.Song
 
+@Immutable
 data class PlayerUiState(
     val currentSong: Song? = null,
     val isPlaying: Boolean = false,
@@ -15,24 +17,12 @@ data class PlayerUiState(
     val isBuffering: Boolean = false,
     val errorMessage: String? = null
 ) {
-    val progress: Float
-        get() = if (durationMs > 0) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    val progress: Float =
+        if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 
-    val formattedPosition: String
-        get() {
-            if (positionMs <= 0) return "0:00"
-            val totalSeconds = positionMs / 1000
-            val minutes = totalSeconds / 60
-            val seconds = totalSeconds % 60
-            return String.format("%d:%02d", minutes, seconds)
-        }
+    val formattedPosition: String =
+        if (positionMs <= 0L) "0:00" else Song.formatDurationMs(positionMs)
 
-    val formattedDuration: String
-        get() {
-            if (durationMs <= 0) return "--:--"
-            val totalSeconds = durationMs / 1000
-            val minutes = totalSeconds / 60
-            val seconds = totalSeconds % 60
-            return String.format("%d:%02d", minutes, seconds)
-        }
+    val formattedDuration: String =
+        if (durationMs <= 0L) "--:--" else Song.formatDurationMs(durationMs)
 }
