@@ -30,6 +30,8 @@ data class PlayerUiState(
 
     val formattedPlaybackSpeed: String = formatSpeed(playbackSpeed)
 
+    val formattedPlaybackSpeedButton: String = formatSpeedButtonLabel(playbackSpeed)
+
     companion object {
         val PLAYBACK_SPEED_OPTIONS: List<Float> = listOf(
             0.5f,
@@ -37,7 +39,6 @@ data class PlayerUiState(
             1.0f,
             1.25f,
             1.5f,
-            1.75f,
             2.0f
         )
 
@@ -53,6 +54,21 @@ data class PlayerUiState(
                 abs(safe - 2.0f) < 0.01f -> "2×"
                 safe % 1.0f == 0f -> "${safe.toInt()}×"
                 else -> "${safe}×"
+            }
+        }
+
+        fun formatSpeedButtonLabel(speed: Float): String {
+            val safe = speed.coerceIn(0.25f, 3.0f)
+            return when {
+                abs(safe - 0.5f) < 0.01f -> "0.5X"
+                abs(safe - 0.75f) < 0.01f -> "0.75X"
+                abs(safe - 1.0f) < 0.01f -> "1.0X"
+                abs(safe - 1.25f) < 0.01f -> "1.25X"
+                abs(safe - 1.5f) < 0.01f -> "1.5X"
+                abs(safe - 1.75f) < 0.01f -> "1.75X"
+                abs(safe - 2.0f) < 0.01f -> "2.0X"
+                safe % 1.0f == 0f -> "${safe.toInt()}.0X"
+                else -> "${safe}X"
             }
         }
     }

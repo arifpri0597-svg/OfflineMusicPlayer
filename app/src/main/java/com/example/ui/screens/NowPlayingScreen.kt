@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
+import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -22,6 +27,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,6 +35,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,7 +50,6 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -54,10 +60,9 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -66,9 +71,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -103,9 +108,14 @@ import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPinkLight
 import com.example.ui.theme.NeonPurple
+import java.io.File
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.sin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 
 // Pre-allocated static brushes & shapes to avoid object allocations during recompositions
 private val NowPlayingBackgroundBrush = Brush.verticalGradient(
@@ -137,7 +147,14 @@ private val VisualizerBarBrush = Brush.verticalGradient(
 )
 
 private val ArtworkCornerShape = RoundedCornerShape(30.dp)
+private val BottomSheetTopCornerShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 private val PillShape = RoundedCornerShape(50)
+
+@Immutable
+data class TrackMetadataRow(
+    val label: String,
+    val value: String
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -165,7 +182,7 @@ fun NowPlayingScreen(
 
     var showQueueSheet by remember { mutableStateOf(false) }
     var showPlaybackSpeedSheet by remember { mutableStateOf(false) }
-    var showTrackDetailsDialog by remember { mutableStateOf(false) }
+    var showTrackInfoSheet by remember { mutableStateOf(false) }
     val song = playerState.currentSong ?: return
 
     val artworkScale by animateFloatAsState(
@@ -179,7 +196,7 @@ fun NowPlayingScreen(
 
     val onOpenQueue = remember { { showQueueSheet = true } }
     val onOpenPlaybackSpeed = remember { { showPlaybackSpeedSheet = true } }
-    val onShowTrackInfo = remember { { showTrackDetailsDialog = true } }
+    val onShowTrackInfo = remember { { showTrackInfoSheet = true } }
     val onRewind10s = remember(onSeekRelative) { { onSeekRelative(-10_000L) } }
     val onForward10s = remember(onSeekRelative) { { onSeekRelative(10_000L) } }
     val onAddCurrentToPlaylist = remember(song, onAddToPlaylist) { { onAddToPlaylist(song) } }
@@ -195,22 +212,22 @@ fun NowPlayingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(horizontal = 24.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Bar: Minimize button on left, "NOW PLAYING" + Song title in center, Queue button on right
+            // 1. Top Bar: Back/Collapse button on left, "NOW PLAYING" in center, Queue button on right
             NowPlayingTopBar(
                 songTitle = song.title,
                 onCollapse = onCollapse,
                 onOpenQueue = onOpenQueue
             )
 
-            // 2. Large Centered Square Album Artwork (28-32dp rounded corners, subtle neon border & glow)
+            // 2. Large Centered Square Album Artwork (rounded corners, neon border & glow)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 284.dp)
+                    .widthIn(max = 268.dp)
                     .weight(1f, fill = false)
                     .aspectRatio(1f)
                     .graphicsLayer {
@@ -235,27 +252,21 @@ fun NowPlayingScreen(
                 NowPlayingHeroArtwork(albumArtUri = song.albumArtUri)
             }
 
-            // 3. Song Information (Centered title max 1-2 lines with ellipsis, Artist underneath)
+            // 3. Song Information (Centered title & Artist underneath)
             NowPlayingTrackMetadata(
                 title = song.title,
                 artist = song.artist
             )
 
-            // 4. Essential Action Buttons (Compact Pill-Shaped: 1. Favorite, 2. Add to Playlist, 3. More)
+            // 4. Action Row: [ ♡ Favorite ] [ + Add to Playlist ] [ ⓘ Track Info ]
             NowPlayingActionBar(
                 isFavorite = isFavorite,
-                queueSize = playerState.queue.size,
-                formattedPlaybackSpeed = playerState.formattedPlaybackSpeed,
                 onToggleFavorite = onToggleFavorite,
                 onAddToPlaylist = onAddCurrentToPlaylist,
-                onOpenPlaybackSpeed = onOpenPlaybackSpeed,
-                onOpenQueue = onOpenQueue,
-                onRewind10s = onRewind10s,
-                onForward10s = onForward10s,
                 onShowTrackInfo = onShowTrackInfo
             )
 
-            // 5. Progress Bar (Pink/magenta indicator, current time left, total duration right)
+            // 5. Progress Bar (Seek bar, Current time left, Total duration right)
             NowPlayingProgressSection(
                 progress = playerState.progress,
                 durationMs = playerState.durationMs,
@@ -264,7 +275,7 @@ fun NowPlayingScreen(
                 onSeekTo = onSeekTo
             )
 
-            // 6. Playback Controls (Shuffle, Previous, Large Play/Pause, Next, Repeat)
+            // 6. Main Playback Controls (Shuffle, Previous, Play/Pause, Next, Repeat)
             NowPlayingControlsRow(
                 isPlaying = playerState.isPlaying,
                 isShuffleEnabled = playerState.isShuffleEnabled,
@@ -276,41 +287,41 @@ fun NowPlayingScreen(
                 onCycleRepeatMode = onCycleRepeatMode
             )
 
-            // 7. Small Subtle Audio Visualizer / Equalizer near the bottom (pauses when music is paused)
+            // 7. Secondary Controls (10-second rewind, Playback Speed [ 1.0X ], 10-second forward)
+            NowPlayingSecondaryControlsRow(
+                playbackSpeed = playerState.playbackSpeed,
+                formattedSpeedButton = playerState.formattedPlaybackSpeedButton,
+                onRewind10s = onRewind10s,
+                onOpenPlaybackSpeed = onOpenPlaybackSpeed,
+                onForward10s = onForward10s
+            )
+
+            // 8. Subtle Audio Visualizer near the bottom (pauses when music is paused)
             NowPlayingWaveformVisualizer(
                 isPlaying = playerState.isPlaying,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(26.dp)
+                    .height(22.dp)
                     .padding(horizontal = 20.dp)
                     .testTag("now_playing_waveform")
             )
         }
 
-        // Track Details Dialog
-        if (showTrackDetailsDialog) {
-            AlertDialog(
-                onDismissRequest = { showTrackDetailsDialog = false },
-                title = {
-                    Text(
-                        text = "Track Information",
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Title: ${song.title}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Artist: ${song.artist}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Album: ${song.album}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Duration: ${song.formattedDuration}", style = MaterialTheme.typography.bodyMedium)
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showTrackDetailsDialog = false }) {
-                        Text("Close", color = NeonPink)
-                    }
-                }
-            )
+        // Track Info Modal Bottom Sheet
+        if (showTrackInfoSheet) {
+            val trackInfoSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = { showTrackInfoSheet = false },
+                sheetState = trackInfoSheetState,
+                shape = BottomSheetTopCornerShape,
+                containerColor = Color(0xFF140826),
+                modifier = Modifier.testTag("track_info_bottom_sheet")
+            ) {
+                TrackInfoBottomSheetContent(
+                    song = song,
+                    onDismiss = { showTrackInfoSheet = false }
+                )
+            }
         }
 
         // Queue Modal Bottom Sheet
@@ -319,7 +330,8 @@ fun NowPlayingScreen(
             ModalBottomSheet(
                 onDismissRequest = { showQueueSheet = false },
                 sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface
+                shape = BottomSheetTopCornerShape,
+                containerColor = Color(0xFF140826)
             ) {
                 Column(
                     modifier = Modifier
@@ -334,10 +346,15 @@ fun NowPlayingScreen(
                         Text(
                             text = "Playback Queue (${playerState.queue.size})",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
                         IconButton(onClick = { showQueueSheet = false }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close queue")
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close queue",
+                                tint = Color.White
+                            )
                         }
                     }
 
@@ -427,6 +444,7 @@ fun NowPlayingScreen(
             ModalBottomSheet(
                 onDismissRequest = { showPlaybackSpeedSheet = false },
                 sheetState = speedSheetState,
+                shape = BottomSheetTopCornerShape,
                 containerColor = Color(0xFF140826),
                 modifier = Modifier.testTag("playback_speed_bottom_sheet")
             ) {
@@ -455,7 +473,6 @@ private val PLAYBACK_SPEED_PRESETS = listOf(
     SpeedPresetItem(1.0f, "1×", "Normal", "speed_option_1x"),
     SpeedPresetItem(1.25f, "1.25×", "Slightly Faster", "speed_option_1_25x"),
     SpeedPresetItem(1.5f, "1.5×", "Fast", "speed_option_1_5x"),
-    SpeedPresetItem(1.75f, "1.75×", "Very Fast", "speed_option_1_75x"),
     SpeedPresetItem(2.0f, "2×", "Double Speed", "speed_option_2x")
 )
 
@@ -512,7 +529,7 @@ private fun PlaybackSpeedBottomSheetContent(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (kotlin.math.abs(currentSpeed - 1.0f) >= 0.01f) {
+                if (abs(currentSpeed - 1.0f) >= 0.01f) {
                     Surface(
                         modifier = Modifier
                             .clip(PillShape)
@@ -532,7 +549,10 @@ private fun PlaybackSpeedBottomSheetContent(
                     }
                     Spacer(modifier = Modifier.width(6.dp))
                 }
-                IconButton(onClick = onDismiss) {
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("speed_sheet_close_btn")
+                ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close playback speed",
@@ -549,7 +569,7 @@ private fun PlaybackSpeedBottomSheetContent(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             for (preset in PLAYBACK_SPEED_PRESETS) {
-                val isSelected = kotlin.math.abs(currentSpeed - preset.speed) < 0.01f
+                val isSelected = abs(currentSpeed - preset.speed) < 0.01f
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -621,6 +641,434 @@ private fun PlaybackSpeedBottomSheetContent(
 }
 
 @Composable
+private fun TrackInfoBottomSheetContent(
+    song: Song,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var metadataRows by remember(song.id, song.contentUri, song.path, song.sizeBytes, song.durationMs) {
+        mutableStateOf(buildImmediateTrackMetadataRows(song))
+    }
+
+    LaunchedEffect(song.id, song.contentUri, song.path, song.sizeBytes, song.durationMs) {
+        val enriched = withContext(Dispatchers.IO) {
+            resolveAvailableTrackMetadata(context, song)
+        }
+        if (enriched.isNotEmpty()) {
+            metadataRows = enriched
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = NeonPink.copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.45f)),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = NeonPinkLight,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "Track Info",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Audio file details",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NeonPinkLight
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("track_info_close_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close track info",
+                    tint = Color.White
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF211038).copy(alpha = 0.76f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.35f))
+        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                itemsIndexed(
+                    items = metadataRows,
+                    key = { _, item -> item.label }
+                ) { index, row ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = row.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeonPinkLight,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = row.value,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    if (index < metadataRows.lastIndex) {
+                        HorizontalDivider(
+                            color = NeonPurple.copy(alpha = 0.2f),
+                            thickness = 0.75.dp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Builds the immediate, zero-IO metadata rows from the in-memory [Song] object.
+ * Only fields that are genuinely available and non-empty are returned.
+ */
+internal fun buildImmediateTrackMetadataRows(song: Song): List<TrackMetadataRow> {
+    val rows = mutableListOf<TrackMetadataRow>()
+
+    val cleanTitle = song.title.trim()
+    if (cleanTitle.isNotEmpty() && !cleanTitle.equals("<unknown>", ignoreCase = true)) {
+        rows.add(TrackMetadataRow("Title", cleanTitle))
+    }
+
+    val cleanArtist = song.artist.trim()
+    if (cleanArtist.isNotEmpty() &&
+        !cleanArtist.equals("<unknown>", ignoreCase = true) &&
+        !cleanArtist.equals("Unknown Artist", ignoreCase = true)
+    ) {
+        rows.add(TrackMetadataRow("Artist", cleanArtist))
+    }
+
+    val cleanAlbum = song.album.trim()
+    if (cleanAlbum.isNotEmpty() &&
+        !cleanAlbum.equals("<unknown>", ignoreCase = true) &&
+        !cleanAlbum.equals("Unknown Album", ignoreCase = true)
+    ) {
+        rows.add(TrackMetadataRow("Album", cleanAlbum))
+    }
+
+    if (song.durationMs > 0L) {
+        rows.add(TrackMetadataRow("Duration", Song.formatDurationMs(song.durationMs)))
+    }
+
+    val cleanPath = song.path.trim()
+    val fileFromPath = if (cleanPath.isNotEmpty()) File(cleanPath) else null
+    val fileName = fileFromPath?.name?.takeIf { it.isNotBlank() }
+    if (!fileName.isNullOrBlank()) {
+        rows.add(TrackMetadataRow("File Name", fileName))
+    }
+
+    if (cleanPath.isNotEmpty()) {
+        rows.add(TrackMetadataRow("File Location", cleanPath))
+    }
+
+    if (song.sizeBytes > 0L) {
+        rows.add(TrackMetadataRow("File Size", formatFileSizeBytes(song.sizeBytes)))
+    }
+
+    val ext = fileName?.substringAfterLast('.', "")?.trim()?.uppercase(Locale.US)
+    if (!ext.isNullOrEmpty() && ext.length in 2..5) {
+        rows.add(TrackMetadataRow("Format", ext))
+    }
+
+    return rows
+}
+
+/**
+ * Inspects the song and underlying media stream on a background thread to extract
+ * real available metadata without any fake or hardcoded values.
+ */
+internal fun resolveAvailableTrackMetadata(context: Context, song: Song): List<TrackMetadataRow> {
+    val rows = mutableListOf<TrackMetadataRow>()
+
+    val cleanTitle = song.title.trim()
+    if (cleanTitle.isNotEmpty() && !cleanTitle.equals("<unknown>", ignoreCase = true)) {
+        rows.add(TrackMetadataRow("Title", cleanTitle))
+    }
+
+    val cleanArtist = song.artist.trim()
+    if (cleanArtist.isNotEmpty() &&
+        !cleanArtist.equals("<unknown>", ignoreCase = true) &&
+        !cleanArtist.equals("Unknown Artist", ignoreCase = true)
+    ) {
+        rows.add(TrackMetadataRow("Artist", cleanArtist))
+    }
+
+    val cleanAlbum = song.album.trim()
+    if (cleanAlbum.isNotEmpty() &&
+        !cleanAlbum.equals("<unknown>", ignoreCase = true) &&
+        !cleanAlbum.equals("Unknown Album", ignoreCase = true)
+    ) {
+        rows.add(TrackMetadataRow("Album", cleanAlbum))
+    }
+
+    var resolvedDurationMs = song.durationMs
+    var resolvedFileName: String? = null
+    var resolvedLocation: String? = song.path.trim().takeIf { it.isNotEmpty() }
+    var resolvedSizeBytes = song.sizeBytes
+    var resolvedMimeType: String? = null
+    var resolvedBitrateBps: Int = 0
+    var resolvedSampleRateHz: Int = 0
+
+    if (!resolvedLocation.isNullOrBlank()) {
+        val f = File(resolvedLocation)
+        resolvedFileName = f.name.takeIf { it.isNotBlank() }
+        if (resolvedSizeBytes <= 0L && f.exists()) {
+            resolvedSizeBytes = f.length()
+        }
+    }
+
+    // Query ContentResolver for display name, size, and MIME type if content:// URI
+    if (song.contentUri.scheme.equals("content", ignoreCase = true)) {
+        try {
+            resolvedMimeType = context.contentResolver.getType(song.contentUri)
+        } catch (_: Exception) {
+        }
+        if (resolvedFileName.isNullOrBlank() || resolvedSizeBytes <= 0L) {
+            try {
+                context.contentResolver.query(
+                    song.contentUri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        if (resolvedFileName.isNullOrBlank()) {
+                            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIdx >= 0 && !cursor.isNull(nameIdx)) {
+                                resolvedFileName = cursor.getString(nameIdx)?.trim()?.takeIf { it.isNotEmpty() }
+                            }
+                        }
+                        if (resolvedSizeBytes <= 0L) {
+                            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
+                                resolvedSizeBytes = cursor.getLong(sizeIdx)
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    } else if (song.contentUri.scheme.equals("file", ignoreCase = true)) {
+        val uriPath = song.contentUri.path
+        if (!uriPath.isNullOrBlank()) {
+            val f = File(uriPath)
+            if (resolvedLocation.isNullOrBlank()) {
+                resolvedLocation = f.absolutePath
+            }
+            if (resolvedFileName.isNullOrBlank()) {
+                resolvedFileName = f.name.takeIf { it.isNotBlank() }
+            }
+            if (resolvedSizeBytes <= 0L && f.exists()) {
+                resolvedSizeBytes = f.length()
+            }
+        }
+    }
+
+    // Probe real audio header with MediaMetadataRetriever for Bitrate / Duration / MimeType
+    val retriever = MediaMetadataRetriever()
+    try {
+        var dataSourceSet = false
+        if (!resolvedLocation.isNullOrBlank() && File(resolvedLocation).exists()) {
+            retriever.setDataSource(resolvedLocation)
+            dataSourceSet = true
+        } else {
+            retriever.setDataSource(context, song.contentUri)
+            dataSourceSet = true
+        }
+        if (dataSourceSet) {
+            if (resolvedDurationMs <= 0L) {
+                resolvedDurationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            }
+            if (resolvedMimeType.isNullOrBlank()) {
+                resolvedMimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                    ?.trim()?.takeIf { it.isNotEmpty() }
+            }
+            resolvedBitrateBps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                ?.toIntOrNull() ?: 0
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                resolvedSampleRateHz = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
+                    ?.toIntOrNull() ?: 0
+            }
+        }
+    } catch (_: Exception) {
+    } finally {
+        try {
+            retriever.release()
+        } catch (_: Exception) {
+        }
+    }
+
+    // Probe MediaExtractor if Sample Rate, Bitrate, or MIME is still needed
+    if (resolvedSampleRateHz <= 0 || resolvedBitrateBps <= 0 || resolvedMimeType.isNullOrBlank()) {
+        val extractor = MediaExtractor()
+        try {
+            if (!resolvedLocation.isNullOrBlank() && File(resolvedLocation).exists()) {
+                extractor.setDataSource(resolvedLocation)
+            } else {
+                extractor.setDataSource(context, song.contentUri, null)
+            }
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = if (format.containsKey(MediaFormat.KEY_MIME)) {
+                    format.getString(MediaFormat.KEY_MIME)
+                } else {
+                    null
+                }
+                if (mime != null && mime.startsWith("audio/")) {
+                    if (resolvedMimeType.isNullOrBlank()) {
+                        resolvedMimeType = mime
+                    }
+                    if (resolvedSampleRateHz <= 0 && format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        resolvedSampleRateHz = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    }
+                    if (resolvedBitrateBps <= 0 && format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                        resolvedBitrateBps = format.getInteger(MediaFormat.KEY_BIT_RATE)
+                    }
+                    break
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    if (resolvedDurationMs > 0L) {
+        rows.add(TrackMetadataRow("Duration", Song.formatDurationMs(resolvedDurationMs)))
+    }
+
+    if (!resolvedFileName.isNullOrBlank()) {
+        rows.add(TrackMetadataRow("File Name", resolvedFileName!!))
+    }
+
+    if (!resolvedLocation.isNullOrBlank()) {
+        rows.add(TrackMetadataRow("File Location", resolvedLocation!!))
+    }
+
+    if (resolvedSizeBytes > 0L) {
+        rows.add(TrackMetadataRow("File Size", formatFileSizeBytes(resolvedSizeBytes)))
+    }
+
+    val formatDisplay = formatAudioFormatLabel(resolvedFileName, resolvedMimeType)
+    if (!formatDisplay.isNullOrBlank()) {
+        rows.add(TrackMetadataRow("Format", formatDisplay))
+    }
+
+    if (resolvedBitrateBps > 0) {
+        val kbps = (resolvedBitrateBps / 1000).coerceAtLeast(1)
+        rows.add(TrackMetadataRow("Bitrate", "$kbps kbps"))
+    }
+
+    if (resolvedSampleRateHz > 0) {
+        val sampleRateLabel = if (resolvedSampleRateHz % 1000 == 0) {
+            "${resolvedSampleRateHz / 1000} kHz"
+        } else {
+            String.format(Locale.US, "%.1f kHz", resolvedSampleRateHz / 1000.0)
+        }
+        rows.add(TrackMetadataRow("Sample Rate", sampleRateLabel))
+    }
+
+    return rows
+}
+
+internal fun formatFileSizeBytes(bytes: Long): String {
+    if (bytes <= 0L) return ""
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    return when {
+        mb >= 1.0 -> String.format(Locale.US, "%.2f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.0f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+private fun formatAudioFormatLabel(fileName: String?, mimeType: String?): String? {
+    val ext = fileName
+        ?.substringAfterLast('.', "")
+        ?.trim()
+        ?.uppercase(Locale.US)
+        ?.takeIf { it.length in 2..5 }
+
+    val cleanMime = mimeType?.trim()?.lowercase(Locale.US)?.takeIf { it.isNotEmpty() }
+    val mimeLabel = when (cleanMime) {
+        "audio/mpeg", "audio/mp3" -> "MP3"
+        "audio/flac", "audio/x-flac", "application/flac" -> "FLAC"
+        "audio/wav", "audio/x-wav", "audio/wave" -> "WAV"
+        "audio/mp4", "audio/m4a", "audio/x-m4a" -> "M4A"
+        "audio/aac", "audio/aacp" -> "AAC"
+        "audio/ogg", "application/ogg" -> "OGG"
+        "audio/opus" -> "OPUS"
+        "audio/webm" -> "WEBM"
+        else -> null
+    }
+
+    return when {
+        ext != null && cleanMime != null -> "$ext ($cleanMime)"
+        ext != null -> ext
+        mimeLabel != null && cleanMime != null -> "$mimeLabel ($cleanMime)"
+        cleanMime != null -> cleanMime
+        else -> null
+    }
+}
+
+@Composable
 private fun NowPlayingTopBar(
     songTitle: String,
     onCollapse: () -> Unit,
@@ -635,7 +1083,7 @@ private fun NowPlayingTopBar(
             shape = CircleShape,
             color = Color(0xFF221238).copy(alpha = 0.75f),
             border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f)),
-            modifier = Modifier.size(42.dp)
+            modifier = Modifier.size(44.dp)
         ) {
             IconButton(
                 onClick = onCollapse,
@@ -677,7 +1125,7 @@ private fun NowPlayingTopBar(
             shape = CircleShape,
             color = Color(0xFF221238).copy(alpha = 0.75f),
             border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f)),
-            modifier = Modifier.size(42.dp)
+            modifier = Modifier.size(44.dp)
         ) {
             IconButton(
                 onClick = onOpenQueue,
@@ -798,24 +1246,20 @@ private fun NowPlayingTrackMetadata(
     }
 }
 
+/**
+ * Balanced 3-button action row below Artist name:
+ * [ ♡ Favorite ] [ + Add to Playlist ] [ ⓘ Track Info ]
+ */
 @Composable
 private fun NowPlayingActionBar(
     isFavorite: Boolean,
-    queueSize: Int,
-    formattedPlaybackSpeed: String,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    onOpenPlaybackSpeed: () -> Unit,
-    onOpenQueue: () -> Unit,
-    onRewind10s: () -> Unit,
-    onForward10s: () -> Unit,
     onShowTrackInfo: () -> Unit
 ) {
-    var moreMenuExpanded by remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 1. Favorite Pill Button
@@ -828,15 +1272,15 @@ private fun NowPlayingActionBar(
             color = if (isFavorite) {
                 NeonPink.copy(alpha = 0.22f)
             } else {
-                Color(0xFF221238).copy(alpha = 0.7f)
+                Color(0xFF221238).copy(alpha = 0.72f)
             },
             border = BorderStroke(
                 1.dp,
-                if (isFavorite) NeonPink else NeonPurple.copy(alpha = 0.35f)
+                if (isFavorite) NeonPink else NeonPurple.copy(alpha = 0.38f)
             )
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -845,12 +1289,13 @@ private fun NowPlayingActionBar(
                     tint = if (isFavorite) NeonPink else Color.White,
                     modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = "Favorite",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isFavorite) NeonPinkLight else Color.White,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
         }
@@ -862,104 +1307,57 @@ private fun NowPlayingActionBar(
                 .clickable(onClick = onAddToPlaylist)
                 .testTag("now_playing_add_playlist_btn"),
             shape = PillShape,
-            color = Color(0xFF221238).copy(alpha = 0.7f),
-            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.4f))
+            color = Color(0xFF221238).copy(alpha = 0.72f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.38f))
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
                     contentDescription = "Add to Playlist",
                     tint = NeonPinkLight,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = "Add to Playlist",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
         }
 
-        // 3. More Pill Button with Dropdown
-        Box {
-            Surface(
-                modifier = Modifier
-                    .clip(PillShape)
-                    .clickable { moreMenuExpanded = true }
-                    .testTag("now_playing_more_btn"),
-                shape = PillShape,
-                color = Color(0xFF221238).copy(alpha = 0.7f),
-                border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.35f))
+        // 3. Track Info Pill Button
+        Surface(
+            modifier = Modifier
+                .clip(PillShape)
+                .clickable(onClick = onShowTrackInfo)
+                .testTag("now_playing_track_info_btn"),
+            shape = PillShape,
+            color = Color(0xFF221238).copy(alpha = 0.72f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.38f))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "More Options",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "More",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            DropdownMenu(
-                expanded = moreMenuExpanded,
-                onDismissRequest = { moreMenuExpanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Playback Speed ($formattedPlaybackSpeed)") },
-                    leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, tint = NeonPink) },
-                    onClick = {
-                        moreMenuExpanded = false
-                        onOpenPlaybackSpeed()
-                    },
-                    modifier = Modifier.testTag("now_playing_speed_menu_item")
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = "Track Info",
+                    tint = NeonPinkLight,
+                    modifier = Modifier.size(16.dp)
                 )
-                DropdownMenuItem(
-                    text = { Text("Playback Queue ($queueSize)") },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, tint = NeonPurple) },
-                    onClick = {
-                        moreMenuExpanded = false
-                        onOpenQueue()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Rewind 10s") },
-                    leadingIcon = { Icon(Icons.Default.Replay10, contentDescription = null) },
-                    onClick = {
-                        moreMenuExpanded = false
-                        onRewind10s()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Fast-Forward 10s") },
-                    leadingIcon = { Icon(Icons.Default.Forward10, contentDescription = null) },
-                    onClick = {
-                        moreMenuExpanded = false
-                        onForward10s()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Track Info") },
-                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = NeonPinkLight) },
-                    onClick = {
-                        moreMenuExpanded = false
-                        onShowTrackInfo()
-                    }
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "Track Info",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
         }
@@ -1063,11 +1461,11 @@ private fun NowPlayingControlsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Shuffle (Smaller icon, clean and minimal)
+        // 1. Shuffle
         IconButton(
             onClick = onToggleShuffle,
             modifier = Modifier
-                .size(44.dp)
+                .size(48.dp)
                 .testTag("now_playing_shuffle_btn")
         ) {
             Icon(
@@ -1078,7 +1476,7 @@ private fun NowPlayingControlsRow(
             )
         }
 
-        // 2. Previous (Medium circular button, dark transparent purple background, subtle border)
+        // 2. Previous
         Surface(
             shape = CircleShape,
             color = Color(0xFF211037).copy(alpha = 0.78f),
@@ -1098,7 +1496,7 @@ private fun NowPlayingControlsRow(
             }
         }
 
-        // 3. Large Play/Pause (Main visual focus: Large circular button, neon pink/magenta gradient, soft glow, smooth press animation)
+        // 3. Large Play/Pause (Central Visual Focus)
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -1130,7 +1528,7 @@ private fun NowPlayingControlsRow(
             )
         }
 
-        // 4. Next (Medium circular button, dark transparent purple background, subtle border)
+        // 4. Next
         Surface(
             shape = CircleShape,
             color = Color(0xFF211037).copy(alpha = 0.78f),
@@ -1150,11 +1548,11 @@ private fun NowPlayingControlsRow(
             }
         }
 
-        // 5. Repeat (Smaller icon, clean and minimal)
+        // 5. Repeat
         IconButton(
             onClick = onCycleRepeatMode,
             modifier = Modifier
-                .size(44.dp)
+                .size(48.dp)
                 .testTag("now_playing_repeat_btn")
         ) {
             val repeatIcon = when (repeatMode) {
@@ -1168,6 +1566,103 @@ private fun NowPlayingControlsRow(
                 tint = if (isRepeatActive) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp)
             )
+        }
+    }
+}
+
+/**
+ * Secondary playback controls row in the lower playback-control area:
+ * - 10-second rewind (circular-arrow icon with "10" inside)
+ * - Playback Speed button ([ 1.0X ])
+ * - 10-second forward (circular-arrow icon with "10" inside)
+ */
+@Composable
+private fun NowPlayingSecondaryControlsRow(
+    playbackSpeed: Float,
+    formattedSpeedButton: String,
+    onRewind10s: () -> Unit,
+    onOpenPlaybackSpeed: () -> Unit,
+    onForward10s: () -> Unit
+) {
+    val isCustomSpeed = abs(playbackSpeed - 1.0f) >= 0.01f
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 28.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // 1. 10-second Rewind
+        Surface(
+            shape = CircleShape,
+            color = Color(0xFF211037).copy(alpha = 0.68f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.32f)),
+            modifier = Modifier.size(48.dp)
+        ) {
+            IconButton(
+                onClick = onRewind10s,
+                modifier = Modifier.testTag("now_playing_rewind_10s_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Replay10,
+                    contentDescription = "Rewind 10 seconds",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // 2. Playback Speed Button (e.g. [ 1.0X ])
+        Surface(
+            modifier = Modifier
+                .heightIn(min = 38.dp)
+                .clip(PillShape)
+                .clickable(onClick = onOpenPlaybackSpeed)
+                .testTag("now_playing_speed_btn"),
+            shape = PillShape,
+            color = if (isCustomSpeed) {
+                NeonPink.copy(alpha = 0.22f)
+            } else {
+                Color(0xFF211037).copy(alpha = 0.72f)
+            },
+            border = BorderStroke(
+                width = 1.dp,
+                color = if (isCustomSpeed) NeonPink else NeonPurple.copy(alpha = 0.42f)
+            )
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = formattedSpeedButton,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.6.sp,
+                    color = if (isCustomSpeed) NeonPinkLight else Color.White
+                )
+            }
+        }
+
+        // 3. 10-second Forward
+        Surface(
+            shape = CircleShape,
+            color = Color(0xFF211037).copy(alpha = 0.68f),
+            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.32f)),
+            modifier = Modifier.size(48.dp)
+        ) {
+            IconButton(
+                onClick = onForward10s,
+                modifier = Modifier.testTag("now_playing_forward_10s_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Forward10,
+                    contentDescription = "Forward 10 seconds",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
@@ -1211,7 +1706,7 @@ private fun NowPlayingWaveformVisualizer(
         val barWidth = (slotWidth * 0.48f).coerceAtLeast(2.5.dp.toPx())
 
         for (i in 0 until barCount) {
-            val normalizedCenterDist = 1f - kotlin.math.abs((i - barCount / 2f) / (barCount / 2f))
+            val normalizedCenterDist = 1f - abs((i - barCount / 2f) / (barCount / 2f))
             val wave1 = sin(phase + i * 0.48f) * 0.5f + 0.5f
             val wave2 = sin(phase * 1.4f - i * 0.32f) * 0.5f + 0.5f
             val combinedWave = (wave1 * 0.65f + wave2 * 0.35f) * normalizedCenterDist
@@ -1230,5 +1725,3 @@ private fun NowPlayingWaveformVisualizer(
         }
     }
 }
-
-
