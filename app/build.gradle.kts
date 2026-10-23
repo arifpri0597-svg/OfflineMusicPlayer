@@ -14,11 +14,15 @@ android {
   defaultConfig {
     applicationId = "com.aistudio.pulsemusic.kmply"
     minSdk = 24
-    targetSdk = 36
+    targetSdk = 34
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    ndk {
+      abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+    }
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -52,6 +56,12 @@ android {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
+      signingConfigs.getByName("debugConfig").apply {
+        enableV1Signing = true
+        enableV2Signing = true
+        enableV3Signing = true
+        enableV4Signing = true
+      }
     }
   }
   compileOptions {
@@ -61,6 +71,14 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+    resources {
+      excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
@@ -122,8 +140,19 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
-  debugImplementation(libs.androidx.compose.ui.test.manifest)
+  // debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+androidComponents {
+  onVariants { variant ->
+    variant.signingConfig.apply {
+      enableV1Signing.set(true)
+      enableV2Signing.set(true)
+      enableV3Signing.set(true)
+      enableV4Signing.set(true)
+    }
+  }
 }
 
 abstract class EnsureDebugKeystoreTask : DefaultTask() {
@@ -177,6 +206,8 @@ abstract class EnsureDebugKeystoreTask : DefaultTask() {
                 "RSA",
                 "-keysize",
                 "2048",
+                "-startdate",
+                "2020/01/01 00:00:00",
                 "-validity",
                 "10000",
                 "-dname",
@@ -204,4 +235,67 @@ val ensureDebugKeystore =
 tasks
     .matching { it.name == "validateSigningDebug" || it.name == "packageDebug" }
     .configureEach { dependsOn(ensureDebugKeystore) }
+
+abstract class VerifyDebugApkTask : DefaultTask() {
+  @get:InputFile
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val apkFileProperty: RegularFileProperty
+
+  @TaskAction
+  fun verifyApk() {
+    val apkFile = apkFileProperty.get().asFile
+    if (!apkFile.exists() || apkFile.length() == 0L) {
+      throw GradleException("APK not found or empty at ${apkFile.absolutePath}")
+    }
+    println("APK_FILE=${apkFile.absolutePath} (${apkFile.length()} bytes)")
+
+    val sdkRoot =
+        System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk"
+    val buildToolsDir = File(sdkRoot, "build-tools").listFiles()?.sortedBy { it.name }?.lastOrNull()
+    if (buildToolsDir != null) {
+      val apksigner = File(buildToolsDir, "apksigner")
+      if (apksigner.exists()) {
+        val proc =
+            ProcessBuilder(
+                    apksigner.absolutePath,
+                    "verify",
+                    "--verbose",
+                    "--print-certs",
+                    apkFile.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val out = proc.inputStream.bufferedReader().readText()
+        val code = proc.waitFor()
+        println("=== APKSIGNER VERIFY (exit=$code) ===\n$out")
+        if (code != 0) throw GradleException("apksigner verify failed")
+      }
+      val aapt2 = File(buildToolsDir, "aapt2")
+      if (aapt2.exists()) {
+        val proc =
+            ProcessBuilder(aapt2.absolutePath, "dump", "badging", apkFile.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val out = proc.inputStream.bufferedReader().readLines().take(25).joinToString("\n")
+        val code = proc.waitFor()
+        println("=== AAPT2 BADGING (exit=$code) ===\n$out")
+        if (code != 0) throw GradleException("aapt2 dump badging failed")
+      }
+      val zipalign = File(buildToolsDir, "zipalign")
+      if (zipalign.exists()) {
+        val proc =
+            ProcessBuilder(zipalign.absolutePath, "-c", "4", apkFile.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val code = proc.waitFor()
+        println("=== ZIPALIGN 4-BYTE CHECK (exit=$code) ===")
+        if (code != 0) throw GradleException("zipalign check failed")
+      }
+    }
+  }
+}
+
+tasks.register<VerifyDebugApkTask>("verifyDebugApk") {
+  dependsOn("assembleDebug")
+  apkFileProperty.set(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+}
 

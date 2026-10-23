@@ -36,21 +36,17 @@ jobs:
             exit 1
           fi
           if [ ! -f "debug.keystore" ]; then
-            if [ -f "debug.keystore.base64" ]; then
-              echo "=== Restoring debug.keystore from debug.keystore.base64 ==="
-              base64 -d debug.keystore.base64 > debug.keystore
-            else
-              echo "=== Generating standard Android debug.keystore ==="
-              keytool -genkeypair -v \
-                -keystore debug.keystore \
-                -storepass android \
-                -alias androiddebugkey \
-                -keypass android \
-                -keyalg RSA \
-                -keysize 2048 \
-                -validity 10000 \
-                -dname "CN=Android Debug,O=Android,C=US"
-            fi
+            echo "=== Generating standard Android debug.keystore ==="
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -startdate "2020/01/01 00:00:00" \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
             cp .env.example .env
@@ -61,20 +57,31 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew clean assembleDebug --stacktrace
 
       - name: Verify APK Output
         run: |
-          echo "=== Locating built APK ==="
-          find . -name "*.apk" -ls
-          mkdir -p app/build/outputs/apk/debug/
-          find . -name "*debug*.apk" -exec cp {} app/build/outputs/apk/debug/ \;
-          echo "Verified APK output contents:"
-          ls -la app/build/outputs/apk/debug/
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: Expected Debug APK not found at $APK_PATH"
+            exit 1
+          fi
+          ls -lh "$APK_PATH"
+          APKSIGNER_BIN=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER_BIN" ]; then
+            echo "=== Verifying APK Signature with $APKSIGNER_BIN ==="
+            "$APKSIGNER_BIN" verify --verbose --print-certs "$APK_PATH"
+          fi
+          AAPT2_BIN=$(find $ANDROID_HOME/build-tools -name "aapt2" | sort -V | tail -n 1)
+          if [ -n "$AAPT2_BIN" ]; then
+            echo "=== Verifying APK Badging with $AAPT2_BIN ==="
+            "$AAPT2_BIN" dump badging "$APK_PATH" | head -n 30
+          fi
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v6
         with:
           name: OfflineMusicPlayer-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
           retention-days: 14
