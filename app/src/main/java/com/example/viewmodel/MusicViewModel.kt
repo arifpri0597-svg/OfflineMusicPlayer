@@ -202,7 +202,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         ensureDatabaseObserversStarted()
-        playerController.ensureControllerInitialized()
+        playerController.connectIfServiceActive()
         if (!wasGranted || hasPerformedInitialScan.compareAndSet(false, true)) {
             hasPerformedInitialScan.set(true)
             refreshLibrary()
@@ -591,9 +591,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        savePlaybackStateNow()
         super.onCleared()
-        playerController.release()
+        playerController.stopAndReleaseOnTaskRemoved()
     }
 }
 

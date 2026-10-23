@@ -230,10 +230,58 @@ class MusicPlayerController(
     @Volatile
     private var isControllerConnectionRequested: Boolean = false
 
+    private val serviceTaskRemovedListener: () -> Unit = {
+        onServiceTaskRemoved()
+    }
+
     init {
+        PlaybackService.registerTaskRemovedListener(serviceTaskRemovedListener)
         if (initialPlayer != null) {
             initialPlayer.addListener(playerListener)
             syncStateFromPlayer()
+        }
+    }
+
+    internal fun onServiceTaskRemoved() {
+        stopProgressUpdate()
+        pendingPlayRequest = null
+        val currentPos = controller?.let { resolveEffectivePosition(it) } ?: _uiState.value.positionMs
+        isUserInitiatedPlayback = false
+        isRestoredPausedState = _uiState.value.currentSong != null
+        restoredPositionFloorMs = currentPos
+        controller?.removeListener(playerListener)
+        controllerFuture?.let {
+            try {
+                MediaController.releaseFuture(it)
+            } catch (_: Exception) {
+            }
+            controllerFuture = null
+        }
+        controller = null
+        isControllerConnectionRequested = false
+        _uiState.update {
+            it.copy(
+                isPlaying = false,
+                isBuffering = false,
+                positionMs = currentPos
+            )
+        }
+    }
+
+    /**
+     * Connects to [PlaybackService] only if the service is already actively running in the background.
+     * Prevents starting PlaybackService or creating a stale MediaSession when the user simply opens the app.
+     */
+    fun connectIfServiceActive() {
+        if (PlaybackService.isServiceRunning) {
+            ensureControllerInitialized()
+        }
+    }
+
+    private fun ensurePlaybackServiceStarted() {
+        try {
+            context.startService(android.content.Intent(context, PlaybackService::class.java))
+        } catch (_: Exception) {
         }
     }
 
@@ -278,11 +326,18 @@ class MusicPlayerController(
     }
 
     private fun initializeMediaController() {
+        ensurePlaybackServiceStarted()
         val sessionToken = SessionToken(
             context,
             ComponentName(context, PlaybackService::class.java)
         )
-        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        val future = MediaController.Builder(context, sessionToken)
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(controller: MediaController) {
+                    onServiceTaskRemoved()
+                }
+            })
+            .buildAsync()
         controllerFuture = future
         future.addListener({
             try {
@@ -449,7 +504,7 @@ class MusicPlayerController(
         val player = controller
         if (player != null && !player.isPlaying) {
             applyRestoredStateToPlayer(player)
-        } else if (player == null) {
+        } else if (player == null && PlaybackService.isServiceRunning) {
             ensureControllerInitialized()
         }
         return true
@@ -588,7 +643,9 @@ class MusicPlayerController(
                 isPlayingOverride = autoPlay,
                 immediate = true
             )
-            ensureControllerInitialized()
+            if (autoPlay || PlaybackService.isServiceRunning) {
+                ensureControllerInitialized()
+            }
             return
         }
 
@@ -733,7 +790,22 @@ class MusicPlayerController(
     }
 
     fun skipToNext() {
-        val player = controller ?: return
+        val player = controller
+        if (player == null) {
+            if (immutableQueue.isEmpty()) return
+            val nextIdx = if (_uiState.value.currentIndex + 1 < immutableQueue.size) {
+                _uiState.value.currentIndex + 1
+            } else {
+                0
+            }
+            playQueue(
+                songs = immutableQueue,
+                startIndex = nextIdx,
+                startPositionMs = 0L,
+                autoPlay = _uiState.value.isPlaying
+            )
+            return
+        }
         isUserInitiatedPlayback = true
         isRestoredPausedState = false
         restoredPositionFloorMs = null
@@ -751,7 +823,22 @@ class MusicPlayerController(
     }
 
     fun skipToPrevious() {
-        val player = controller ?: return
+        val player = controller
+        if (player == null) {
+            if (immutableQueue.isEmpty()) return
+            if (_uiState.value.positionMs > 3000L) {
+                seekTo(0L)
+            } else {
+                val prevIdx = (_uiState.value.currentIndex - 1).coerceAtLeast(0)
+                playQueue(
+                    songs = immutableQueue,
+                    startIndex = prevIdx,
+                    startPositionMs = 0L,
+                    autoPlay = _uiState.value.isPlaying
+                )
+            }
+            return
+        }
         isUserInitiatedPlayback = true
         isRestoredPausedState = false
         restoredPositionFloorMs = null
@@ -884,7 +971,42 @@ class MusicPlayerController(
     }
 
     fun removeFromQueue(index: Int) {
-        val player = controller ?: return
+        val player = controller
+        if (player == null) {
+            if (index in activeQueue.indices) {
+                activeQueue.removeAt(index)
+                immutableQueue = activeQueue.toList()
+                if (immutableQueue.isEmpty()) {
+                    isRestoredPausedState = false
+                    restoredPositionFloorMs = null
+                    _uiState.update {
+                        it.copy(
+                            queue = emptyList(),
+                            currentSong = null,
+                            currentIndex = 0,
+                            isPlaying = false,
+                            positionMs = 0L
+                        )
+                    }
+                    scope.launch {
+                        playbackStateRepository?.clearPlaybackState()
+                    }
+                } else {
+                    val newIdx = _uiState.value.currentIndex.coerceIn(0, immutableQueue.size - 1)
+                    val newSong = immutableQueue[newIdx]
+                    _uiState.update {
+                        it.copy(
+                            queue = immutableQueue,
+                            currentIndex = newIdx,
+                            currentSong = newSong,
+                            durationMs = newSong.durationMs
+                        )
+                    }
+                    saveCurrentPlaybackState(immediate = true)
+                }
+            }
+            return
+        }
         if (index in activeQueue.indices) {
             activeQueue.removeAt(index)
             immutableQueue = activeQueue.toList()
@@ -912,7 +1034,18 @@ class MusicPlayerController(
     }
 
     fun jumpToQueueItem(index: Int) {
-        val player = controller ?: return
+        val player = controller
+        if (player == null) {
+            if (index in activeQueue.indices) {
+                playQueue(
+                    songs = immutableQueue,
+                    startIndex = index,
+                    startPositionMs = 0L,
+                    autoPlay = true
+                )
+            }
+            return
+        }
         if (index in activeQueue.indices) {
             isUserInitiatedPlayback = true
             isRestoredPausedState = false
@@ -1184,12 +1317,62 @@ class MusicPlayerController(
         progressJob = null
     }
 
+    /**
+     * Stops active playback, clears the active MediaController/MediaSession connection,
+     * and stops PlaybackService when the task is removed, while preserving saved position and speed.
+     */
+    fun stopAndReleaseOnTaskRemoved() {
+        saveCurrentPlaybackState(isPlayingOverride = false, immediate = true)
+        stopProgressUpdate()
+        pendingPlayRequest = null
+        PlaybackService.unregisterTaskRemovedListener(serviceTaskRemovedListener)
+        val player = controller
+        if (player != null) {
+            try {
+                player.removeListener(playerListener)
+                player.playWhenReady = false
+                player.pause()
+                player.stop()
+                player.clearMediaItems()
+            } catch (_: Exception) {
+            }
+        }
+        controllerFuture?.let {
+            try {
+                MediaController.releaseFuture(it)
+            } catch (_: Exception) {
+            }
+            controllerFuture = null
+        } ?: run {
+            try {
+                player?.release()
+            } catch (_: Exception) {
+            }
+        }
+        controller = null
+        isControllerConnectionRequested = false
+        _uiState.update {
+            it.copy(
+                isPlaying = false,
+                isBuffering = false
+            )
+        }
+        try {
+            context.stopService(android.content.Intent(context, PlaybackService::class.java))
+        } catch (_: Exception) {
+        }
+    }
+
     fun release() {
         saveCurrentPlaybackState(immediate = true)
         stopProgressUpdate()
+        PlaybackService.unregisterTaskRemovedListener(serviceTaskRemovedListener)
         controller?.removeListener(playerListener)
         controllerFuture?.let {
-            MediaController.releaseFuture(it)
+            try {
+                MediaController.releaseFuture(it)
+            } catch (_: Exception) {
+            }
             controllerFuture = null
         } ?: controller?.release()
         controller = null

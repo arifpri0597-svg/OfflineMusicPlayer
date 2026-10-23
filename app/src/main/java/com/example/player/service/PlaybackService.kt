@@ -5,7 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.annotation.OptIn
@@ -26,6 +25,9 @@ import com.example.data.local.PlaybackStateEntity
 import com.example.data.local.PulseDatabase
 import com.example.data.model.RepeatMode
 import com.example.data.repository.PlaybackStateRepository
+import java.util.concurrent.CopyOnWriteArraySet
+import kotlin.math.abs
+import kotlin.math.max
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,13 +36,14 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.max
 
 class PlaybackService : MediaSessionService() {
 
     internal var mediaSession: MediaSession? = null
     internal lateinit var player: ExoPlayer
+    internal var isPlayerReleased: Boolean = false
+        private set
+    private var hasHandledTaskRemoval: Boolean = false
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var periodicSaveJob: Job? = null
@@ -59,15 +62,14 @@ class PlaybackService : MediaSessionService() {
 
     private val servicePlayerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
             if (isPlaying) {
                 restoredFloorPositionMs = null
                 startPeriodicPositionSave()
                 persistPlayerState(immediate = false)
             } else {
                 stopPeriodicPositionSave()
-                if (!isRestoringState) {
-                    persistPlayerState(immediate = true)
-                }
+                persistPlayerState(immediate = true)
             }
         }
 
@@ -76,7 +78,7 @@ class PlaybackService : MediaSessionService() {
             newPosition: Player.PositionInfo,
             reason: Int
         ) {
-            if (isRestoringState) return
+            if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
             if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                 reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT ||
                 reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
@@ -90,7 +92,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            if (isRestoringState) return
+            if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
             if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                 restoredFloorPositionMs = null
                 persistPlayerState(immediate = true)
@@ -98,12 +100,12 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-            if (isRestoringState) return
+            if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
             persistPlayerState(immediate = false)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (isRestoringState) return
+            if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_READY) {
                 persistPlayerState(immediate = false)
             }
@@ -114,11 +116,37 @@ class PlaybackService : MediaSessionService() {
         const val NOTIFICATION_CHANNEL_ID = "pulse_music_channel"
         const val NOTIFICATION_ID = 1001
         private const val PERIODIC_SAVE_INTERVAL_MS = 3000L
+
+        @Volatile
+        var isServiceRunning: Boolean = false
+            internal set
+
+        private val taskRemovedListeners = CopyOnWriteArraySet<() -> Unit>()
+
+        fun registerTaskRemovedListener(listener: () -> Unit) {
+            taskRemovedListeners.add(listener)
+        }
+
+        fun unregisterTaskRemovedListener(listener: () -> Unit) {
+            taskRemovedListeners.remove(listener)
+        }
+
+        private fun notifyTaskRemovedListeners() {
+            for (listener in taskRemovedListeners) {
+                try {
+                    listener.invoke()
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
+        hasHandledTaskRemoval = false
+        isPlayerReleased = false
+        isServiceRunning = true
         createNotificationChannel()
 
         val audioAttributes = AudioAttributes.Builder()
@@ -146,17 +174,22 @@ class PlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
             .build()
+    }
 
-        serviceScope.launch {
-            restoreSavedPlaybackStateIfIdle()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (hasHandledTaskRemoval || isPlayerReleased || mediaSession == null) {
+            stopSelf()
+            return START_NOT_STICKY
         }
+        super.onStartCommand(intent, flags, startId)
+        return START_NOT_STICKY
     }
 
     internal suspend fun restoreSavedPlaybackStateIfIdle(): Boolean {
-        if (!::player.isInitialized || player.mediaItemCount > 0) return false
+        if (!::player.isInitialized || isPlayerReleased || player.mediaItemCount > 0) return false
         val saved = playbackStateRepository.getLastPlaybackState() ?: return false
         val session = playbackStateRepository.resolveRestoredSession(saved, emptyList()) ?: return false
-        if (mediaSession == null || player.mediaItemCount > 0 || player.playWhenReady) return false
+        if (mediaSession == null || isPlayerReleased || player.mediaItemCount > 0 || player.playWhenReady) return false
 
         isRestoringState = true
         try {
@@ -169,7 +202,10 @@ class PlaybackService : MediaSessionService() {
                 val extras = Bundle().apply {
                     putLong("durationMs", song.durationMs)
                     putString("contentUri", song.contentUri.toString())
-                    putBoolean("isExternal", session.isExternal || PlaybackStateRepository.isExternalUriString(song.contentUri.toString()))
+                    putBoolean(
+                        "isExternal",
+                        session.isExternal || PlaybackStateRepository.isExternalUriString(song.contentUri.toString())
+                    )
                 }
                 val metadata = MediaMetadata.Builder()
                     .setTitle(song.title)
@@ -211,9 +247,10 @@ class PlaybackService : MediaSessionService() {
 
     internal fun persistPlayerState(
         positionOverride: Long? = null,
+        isPlayingOverride: Boolean? = null,
         immediate: Boolean = true
     ) {
-        if (!::player.isInitialized || player.mediaItemCount == 0) return
+        if (!::player.isInitialized || isPlayerReleased || player.mediaItemCount == 0) return
         val currentItem = player.currentMediaItem ?: return
         val songId = currentItem.mediaId.toLongOrNull() ?: 0L
         val extras = currentItem.mediaMetadata.extras
@@ -271,7 +308,7 @@ class PlaybackService : MediaSessionService() {
             durationMs = durationMs,
             queueSongIdsCsv = queueIds,
             currentIndex = max(0, player.currentMediaItemIndex),
-            isPlaying = player.isPlaying,
+            isPlaying = isPlayingOverride ?: player.isPlaying,
             shuffleEnabled = player.shuffleModeEnabled,
             repeatMode = repeatMode,
             playbackSpeed = currentSpeed,
@@ -296,7 +333,7 @@ class PlaybackService : MediaSessionService() {
         periodicSaveJob = serviceScope.launch {
             while (isActive) {
                 delay(PERIODIC_SAVE_INTERVAL_MS)
-                if (::player.isInitialized && player.isPlaying && player.mediaItemCount > 0) {
+                if (::player.isInitialized && !isPlayerReleased && player.isPlaying && player.mediaItemCount > 0) {
                     val pos = max(0L, player.currentPosition)
                     val currentId = player.currentMediaItem?.mediaId?.toLongOrNull() ?: -1L
                     if (currentId != lastSavedSongId || abs(pos - lastSavedPositionMs) >= 1000L) {
@@ -313,26 +350,132 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        if (hasHandledTaskRemoval || isPlayerReleased) return null
         return mediaSession
     }
 
+    /**
+     * Triggered when the user swipes PureTune away from Android Recent Apps / Recent Tasks.
+     * Immediately saves playback position & speed, stops audio, clears and releases MediaSession,
+     * removes the notification & lock-screen media controls, releases ExoPlayer, and stops the service.
+     */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        persistPlayerState(immediate = true)
+        shutdownPlaybackAndSessionOnTaskRemoved()
         super.onTaskRemoved(rootIntent)
-        if (!player.playWhenReady || player.mediaItemCount == 0) {
+    }
+
+    internal fun shutdownPlaybackAndSessionOnTaskRemoved() {
+        if (hasHandledTaskRemoval) {
             stopSelf()
+            return
+        }
+        hasHandledTaskRemoval = true
+        isServiceRunning = false
+
+        // 1. Stop periodic position save coroutine
+        stopPeriodicPositionSave()
+
+        // 2. Persist current song, position, and playback speed (with isPlaying = false) before clearing player
+        persistPlayerState(isPlayingOverride = false, immediate = true)
+
+        // 3. Notify in-process MusicPlayerController to unbind MediaController and mark playback stopped
+        notifyTaskRemovedListeners()
+
+        // 4. Stop and clear ExoPlayer immediately so no audio continues in the background
+        if (::player.isInitialized && !isPlayerReleased) {
+            try {
+                player.removeListener(servicePlayerListener)
+                player.playWhenReady = false
+                player.pause()
+                player.stop()
+                player.clearMediaItems()
+            } catch (_: Exception) {
+            }
+        }
+
+        // 5. Remove and release MediaSession so Android removes lock-screen controls and active player entry
+        mediaSession?.let { session ->
+            try {
+                removeSession(session)
+            } catch (_: Exception) {
+            }
+            try {
+                session.release()
+            } catch (_: Exception) {
+            }
+            mediaSession = null
+        }
+
+        // 6. Stop foreground state and cancel any active media notification in NotificationManager
+        clearForegroundAndNotifications()
+
+        // 7. Release ExoPlayer resources safely
+        if (::player.isInitialized && !isPlayerReleased) {
+            isPlayerReleased = true
+            try {
+                player.release()
+            } catch (_: Exception) {
+            }
+        }
+
+        // 8. Cancel service coroutine scope and stop PlaybackService
+        serviceScope.cancel()
+        stopSelf()
+    }
+
+    private fun clearForegroundAndNotifications() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(NOTIFICATION_ID)
+            notificationManager?.cancelAll()
+        } catch (_: Exception) {
         }
     }
 
     override fun onDestroy() {
+        isServiceRunning = false
         stopPeriodicPositionSave()
-        persistPlayerState(immediate = true)
+        if (!hasHandledTaskRemoval) {
+            persistPlayerState(isPlayingOverride = false, immediate = true)
+        }
         serviceScope.cancel()
-        mediaSession?.run {
-            player.removeListener(servicePlayerListener)
-            player.release()
-            release()
+        if (::player.isInitialized && !isPlayerReleased) {
+            try {
+                player.removeListener(servicePlayerListener)
+                player.playWhenReady = false
+                player.pause()
+                player.stop()
+                player.clearMediaItems()
+            } catch (_: Exception) {
+            }
+        }
+        mediaSession?.let { session ->
+            try {
+                removeSession(session)
+            } catch (_: Exception) {
+            }
+            try {
+                session.release()
+            } catch (_: Exception) {
+            }
             mediaSession = null
+        }
+        clearForegroundAndNotifications()
+        if (::player.isInitialized && !isPlayerReleased) {
+            isPlayerReleased = true
+            try {
+                player.release()
+            } catch (_: Exception) {
+            }
         }
         super.onDestroy()
     }
@@ -346,9 +489,8 @@ class PlaybackService : MediaSessionService() {
                 description = descriptionText
                 setShowBadge(false)
             }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.createNotificationChannel(channel)
         }
     }
 }
-

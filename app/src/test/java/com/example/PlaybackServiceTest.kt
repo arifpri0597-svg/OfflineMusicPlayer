@@ -654,6 +654,96 @@ class PlaybackServiceTest {
         db.close()
     }
 
+    @Test
+    fun `onTaskRemoved while playing stops playback removes notification releases mediaSession and stops service without deleting saved data`(): Unit = kotlinx.coroutines.runBlocking {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val serviceController = Robolectric.buildService(PlaybackService::class.java)
+        val service = serviceController.create().get()
+        service.playbackStateRepository.clearPlaybackState()
+        assertTrue(PlaybackService.isServiceRunning)
+        assertNotNull(service.mediaSession)
+
+        val extras = android.os.Bundle().apply {
+            putLong("durationMs", 240_000L)
+            putString("contentUri", "content://media/external/audio/media/404")
+        }
+        val metadata = androidx.media3.common.MediaMetadata.Builder()
+            .setTitle("Neon Skyline")
+            .setArtist("Pulse Synth")
+            .setAlbumTitle("Outrun")
+            .setExtras(extras)
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setMediaId("404")
+            .setUri(Uri.parse("content://media/external/audio/media/404"))
+            .setMediaMetadata(metadata)
+            .build()
+
+        // Simulate active playback at 0:42 with 1.5x speed and an active media notification
+        service.player.setPlaybackSpeed(1.5f)
+        service.player.setMediaItems(listOf(mediaItem), 0, 42_000L)
+        service.player.seekTo(0, 42_000L)
+        service.player.playWhenReady = true
+
+        val dummyNotification = android.app.Notification.Builder(context, PlaybackService.NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("Neon Skyline")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .build()
+        notificationManager.notify(PlaybackService.NOTIFICATION_ID, dummyNotification)
+        assertEquals(1, shadowOf(notificationManager).allNotifications.size)
+
+        // Also connect an in-process MusicPlayerController to verify its state is cleaned up on task removal
+        val song404 = sampleSong(404L, "Neon Skyline", durationMs = 240_000L)
+        controller.playQueue(listOf(song404), startIndex = 0)
+        assertTrue(controller.uiState.value.isPlaying)
+
+        // Swipe PureTune away from Recent Apps while music is actively playing
+        service.onTaskRemoved(Intent())
+
+        // 1. Playback & ExoPlayer stopped and released
+        assertTrue("ExoPlayer must be released on task removal", service.isPlayerReleased)
+        assertFalse("Controller must report playback stopped after task removal", controller.uiState.value.isPlaying)
+
+        // 2. MediaSession removed and released (removes lock-screen media controls)
+        assertNull("MediaSession must be released and nulled on task removal", service.mediaSession)
+
+        // 3. PlaybackService stopped
+        assertTrue("PlaybackService must stop itself when task is removed", shadowOf(service).isStoppedBySelf)
+        assertFalse("PlaybackService.isServiceRunning must be false after task removal", PlaybackService.isServiceRunning)
+
+        // 4. Media notification cancelled from NotificationManager
+        assertTrue(
+            "Media notification must be removed from notification panel",
+            shadowOf(notificationManager).allNotifications.isEmpty()
+        )
+
+        // 5. Saved playback position (0:42) and speed (1.5x) are preserved (isPlaying = false)
+        val savedState = service.playbackStateRepository.getLastPlaybackState()
+        assertNotNull("Saved playback state must not be deleted", savedState)
+        assertEquals(404L, savedState?.songId)
+        assertEquals(42_000L, savedState?.positionMs)
+        assertEquals(1.5f, savedState?.playbackSpeed ?: 1.0f, 0.001f)
+        assertFalse("Saved state must record isPlaying = false", savedState?.isPlaying ?: true)
+
+        serviceController.destroy()
+
+        // 6. Reopen PureTune: restores track/position/speed in UI without auto-playing or recreating stale MediaSession
+        val reopenedController = MusicPlayerController(
+            context = context,
+            scope = testScope,
+            initialPlayer = null,
+            playbackStateRepository = service.playbackStateRepository
+        )
+        assertTrue(reopenedController.restorePlaybackState(listOf(song404)))
+        assertEquals(404L, reopenedController.uiState.value.currentSong?.id)
+        assertEquals(42_000L, reopenedController.uiState.value.positionMs)
+        assertEquals(1.5f, reopenedController.uiState.value.playbackSpeed, 0.001f)
+        assertFalse("Reopening app must not automatically resume playback", reopenedController.uiState.value.isPlaying)
+        assertFalse("Reopening app must not recreate a stale PlaybackService/MediaSession", PlaybackService.isServiceRunning)
+
+        reopenedController.release()
+    }
+
     private class FakePlayerHarness {
         val listeners = mutableListOf<Player.Listener>()
         val mediaItems = mutableListOf<MediaItem>()
