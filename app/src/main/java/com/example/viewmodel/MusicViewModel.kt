@@ -43,6 +43,14 @@ enum class NavigationTab {
 }
 
 @Immutable
+data class RootPlaybackSummary(
+    val currentSongId: Long? = null,
+    val isPlaying: Boolean = false,
+    val hasCurrentSong: Boolean = false,
+    val errorMessage: String? = null
+)
+
+@Immutable
 data class LibraryUiState(
     val isLoading: Boolean = false,
     val songs: List<Song> = emptyList(),
@@ -54,6 +62,12 @@ data class LibraryUiState(
     val selectedPlaylistSongs: List<Song> = emptyList(),
     val songForAddToPlaylist: Song? = null,
     val favoriteIds: Set<Long> = emptySet(),
+    val favoriteSongs: List<Song> = emptyList(),
+    val songsByAlbum: Map<String, List<Song>> = emptyMap(),
+    val songsByArtist: Map<String, List<Song>> = emptyMap(),
+    val songsByFolder: Map<String, List<Song>> = emptyMap(),
+    val totalDurationFormatted: String = "0m",
+    val totalStorageFormatted: String = "0.0 MB",
     val searchQuery: String = "",
     val sortOrder: SortOrder = SortOrder.TITLE_ASC,
     val selectedTab: NavigationTab = NavigationTab.HOME,
@@ -85,6 +99,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     val playerUiState: StateFlow<PlayerUiState> = playerController.uiState
 
+    val rootPlaybackSummary = playerUiState
+        .map { state ->
+            RootPlaybackSummary(
+                currentSongId = state.currentSong?.id,
+                isPlaying = state.isPlaying,
+                hasCurrentSong = state.currentSong != null,
+                errorMessage = state.errorMessage
+            )
+        }
+        .distinctUntilChanged()
+
     private val _libraryState = MutableStateFlow(LibraryUiState())
     val libraryState: StateFlow<LibraryUiState> = _libraryState.asStateFlow()
 
@@ -92,6 +117,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var scanJob: Job? = null
     private val hasStartedDatabaseObservers = java.util.concurrent.atomic.AtomicBoolean(false)
     private val hasPerformedInitialScan = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val hasAttemptedInitialRestore = java.util.concurrent.atomic.AtomicBoolean(false)
     private val isScanInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private var lastGroupedSongIds: List<Long> = emptyList()
 
@@ -113,34 +139,86 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observeSongsFromDatabase() {
         viewModelScope.launch(Dispatchers.Default) {
-            audioScanRepository.getSongsFlow().collect { songsList ->
+            audioScanRepository.getBaseSongsFlow().collect { songsList ->
                 val currentSongIds = songsList.map { it.id }
+                val favIds = _libraryState.value.favoriteIds
+                val favSongs = if (favIds.isEmpty()) emptyList() else songsList.filter { favIds.contains(it.id) }
+
                 if (currentSongIds != lastGroupedSongIds || (songsList.isEmpty() && _libraryState.value.albums.isNotEmpty())) {
                     lastGroupedSongIds = currentSongIds
                     coroutineScope {
                         val albumsDeferred = async { audioScanRepository.getAlbums(songsList) }
                         val artistsDeferred = async { audioScanRepository.getArtists(songsList) }
                         val foldersDeferred = async { audioScanRepository.getFolders(songsList) }
+                        val byAlbumDeferred = async {
+                            songsList.groupBy { it.album.lowercase(java.util.Locale.ROOT) }
+                        }
+                        val byArtistDeferred = async {
+                            songsList.groupBy { it.artist.lowercase(java.util.Locale.ROOT) }
+                        }
+                        val byFolderDeferred = async {
+                            songsList.groupBy { it.folderName.lowercase(java.util.Locale.ROOT) }
+                        }
+                        val statsDeferred = async {
+                            val totalSeconds = songsList.sumOf { it.durationMs } / 1000L
+                            val hours = totalSeconds / 3600L
+                            val minutes = (totalSeconds % 3600L) / 60L
+                            val durStr = if (hours > 0L) "${hours}h ${minutes}m" else "${minutes}m"
+
+                            val totalBytes = songsList.sumOf { it.sizeBytes }
+                            val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
+                            val sizeStr = if (mb >= 1024.0) {
+                                String.format(java.util.Locale.US, "%.2f GB", mb / 1024.0)
+                            } else {
+                                String.format(java.util.Locale.US, "%.1f MB", mb)
+                            }
+                            durStr to sizeStr
+                        }
                         launch { playerController.prewarmMediaItems(songsList) }
 
                         val albums = albumsDeferred.await()
                         val artists = artistsDeferred.await()
                         val folders = foldersDeferred.await()
+                        val byAlbum = byAlbumDeferred.await()
+                        val byArtist = byArtistDeferred.await()
+                        val byFolder = byFolderDeferred.await()
+                        val (durStr, sizeStr) = statsDeferred.await()
+
                         _libraryState.update { state ->
+                            val latestFavIds = state.favoriteIds
+                            val latestFavSongs = if (latestFavIds === favIds) {
+                                favSongs
+                            } else if (latestFavIds.isEmpty()) {
+                                emptyList()
+                            } else {
+                                songsList.filter { latestFavIds.contains(it.id) }
+                            }
                             state.copy(
                                 songs = songsList,
                                 albums = albums,
                                 artists = artists,
-                                folders = folders
+                                folders = folders,
+                                favoriteSongs = latestFavSongs,
+                                songsByAlbum = byAlbum,
+                                songsByArtist = byArtist,
+                                songsByFolder = byFolder,
+                                totalDurationFormatted = durStr,
+                                totalStorageFormatted = sizeStr
                             )
                         }
                     }
                 } else {
                     _libraryState.update { state ->
-                        state.copy(songs = songsList)
+                        state.copy(
+                            songs = songsList,
+                            favoriteSongs = favSongs
+                        )
                     }
                 }
-                if (songsList.isNotEmpty() && _libraryState.value.resumeLastPlayback) {
+                if (songsList.isNotEmpty() &&
+                    _libraryState.value.resumeLastPlayback &&
+                    hasAttemptedInitialRestore.compareAndSet(false, true)
+                ) {
                     playerController.restorePlaybackState(songsList)
                 }
             }
@@ -153,7 +231,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .distinctUntilChanged()
                 .map { it.toHashSet() }
                 .collect { favSet ->
-                    _libraryState.update { it.copy(favoriteIds = favSet) }
+                    val currentSongs = _libraryState.value.songs
+                    val favSongs = if (favSet.isEmpty() || currentSongs.isEmpty()) {
+                        emptyList()
+                    } else {
+                        currentSongs.filter { favSet.contains(it.id) }
+                    }
+                    _libraryState.update {
+                        it.copy(
+                            favoriteIds = favSet,
+                            favoriteSongs = favSongs
+                        )
+                    }
                 }
         }
     }
@@ -217,7 +306,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 audioScanRepository.scanAndSyncDeviceAudio()
                 val currentSongs = _libraryState.value.songs
-                if (_libraryState.value.resumeLastPlayback) {
+                if (_libraryState.value.resumeLastPlayback && _libraryState.value.songs.isNotEmpty()) {
+                    hasAttemptedInitialRestore.set(true)
                     playerController.restorePlaybackState(currentSongs)
                 }
             } catch (e: Exception) {

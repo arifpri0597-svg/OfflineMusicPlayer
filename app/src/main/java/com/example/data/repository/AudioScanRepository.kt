@@ -205,11 +205,11 @@ class AudioScanRepository(
     private val domainSongCache = java.util.concurrent.ConcurrentHashMap<SongEntity, Song>()
 
     /**
-     * Returns a reactive Flow of domain Song objects loaded directly from the local Room database,
-     * combined with the user's favorites state on Dispatchers.Default.
+     * Returns a reactive Flow of domain Song objects loaded directly from the local Room database
+     * without re-emitting the entire song list when favorites change.
      */
-    fun getSongsFlow(): Flow<List<Song>> {
-        val baseSongsFlow = musicDao.getAllCachedSongs()
+    fun getBaseSongsFlow(): Flow<List<Song>> {
+        return musicDao.getAllCachedSongs()
             .distinctUntilChanged()
             .map { songEntities ->
                 if (domainSongCache.size > songEntities.size * 2 + 64) {
@@ -219,6 +219,16 @@ class AudioScanRepository(
                     domainSongCache.getOrPut(entity) { entity.toDomainSong(isFavorite = false) }
                 }
             }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+    }
+
+    /**
+     * Returns a reactive Flow of domain Song objects loaded directly from the local Room database,
+     * combined with the user's favorites state on Dispatchers.Default.
+     */
+    fun getSongsFlow(): Flow<List<Song>> {
+        val baseSongsFlow = getBaseSongsFlow()
         val favIdsFlow = musicDao.getAllFavoriteIds()
             .distinctUntilChanged()
             .map { it.toHashSet() }

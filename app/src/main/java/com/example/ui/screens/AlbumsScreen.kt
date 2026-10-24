@@ -56,6 +56,7 @@ import com.example.ui.components.SongItemRow
 fun AlbumsScreen(
     albums: List<Album>,
     allSongs: List<Song>,
+    songsByAlbum: Map<String, List<Song>> = emptyMap(),
     selectedAlbum: Album?,
     favoriteIds: Set<Long>,
     currentSongId: Long?,
@@ -76,8 +77,9 @@ fun AlbumsScreen(
             onAlbumSelect(null)
         }
 
-        val albumSongs = remember(selectedAlbum, allSongs) {
-            allSongs.filter { it.album.equals(selectedAlbum.title, ignoreCase = true) }
+        val albumSongs = remember(selectedAlbum, songsByAlbum, allSongs) {
+            songsByAlbum[selectedAlbum.title.lowercase(java.util.Locale.ROOT)]
+                ?: allSongs.filter { it.album.equals(selectedAlbum.title, ignoreCase = true) }
         }
 
         LazyColumn(
@@ -86,7 +88,7 @@ fun AlbumsScreen(
                 .testTag("album_detail_screen"),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item {
+            item(key = "album_detail_header", contentType = "header") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -117,13 +119,14 @@ fun AlbumsScreen(
                         ) {
                             if (selectedAlbum.artworkUri != null) {
                                 val imageRequest = remember(selectedAlbum.artworkUri) {
-                                    val key = "album_card_${selectedAlbum.artworkUri}"
+                                    val key = "album_${selectedAlbum.artworkUri}"
                                     ImageRequest.Builder(context)
                                         .data(selectedAlbum.artworkUri)
                                         .memoryCacheKey(key)
                                         .diskCacheKey(key)
                                         .crossfade(false)
-                                        .size(300, 300)
+                                        .size(256, 256)
+                                        .precision(coil.size.Precision.INEXACT)
                                         .build()
                                 }
                                 AsyncImage(

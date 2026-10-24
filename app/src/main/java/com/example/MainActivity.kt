@@ -287,13 +287,22 @@ fun PulseMusicAppRoot(
     onRequestPermission: () -> Unit
 ) {
     val libraryState by viewModel.libraryState.collectAsState()
-    val playerStateRef = viewModel.playerUiState.collectAsState()
+    val initialSummary = remember(viewModel) {
+        val s = viewModel.playerUiState.value
+        com.example.viewmodel.RootPlaybackSummary(
+            currentSongId = s.currentSong?.id,
+            isPlaying = s.isPlaying,
+            hasCurrentSong = s.currentSong != null,
+            errorMessage = s.errorMessage
+        )
+    }
+    val rootPlayback by viewModel.rootPlaybackSummary.collectAsState(initial = initialSummary)
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val currentSongId by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.currentSong?.id } }
-    val isPlaying by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.isPlaying } }
-    val hasCurrentSong by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.currentSong != null } }
-    val errorMessage by remember { androidx.compose.runtime.derivedStateOf { playerStateRef.value.errorMessage } }
+    val currentSongId = rootPlayback.currentSongId
+    val isPlaying = rootPlayback.isPlaying
+    val hasCurrentSong = rootPlayback.hasCurrentSong
+    val errorMessage = rootPlayback.errorMessage
 
     // Display error message if playback error occurs
     LaunchedEffect(errorMessage) {
@@ -325,9 +334,79 @@ fun PulseMusicAppRoot(
         }
     }
 
-    val favoriteSongs = remember(libraryState.songs, libraryState.favoriteIds) {
-        libraryState.songs.filter { libraryState.favoriteIds.contains(it.id) }
+    val favoriteSongs = libraryState.favoriteSongs
+
+    // Stable remembered callbacks to prevent unnecessary screen & row recompositions
+    val onSongClick = remember(viewModel) {
+        { song: com.example.data.model.Song, queue: List<com.example.data.model.Song> ->
+            viewModel.playSongFromList(song, queue)
+        }
     }
+    val onPlayAllList = remember(viewModel) {
+        { list: List<com.example.data.model.Song> -> viewModel.playAll(list, shuffle = false) }
+    }
+    val onShuffleAllList = remember(viewModel) {
+        { list: List<com.example.data.model.Song> -> viewModel.playAll(list, shuffle = true) }
+    }
+    val onPlayAllLibrary = remember(viewModel) {
+        { viewModel.playAll(viewModel.libraryState.value.songs, shuffle = false) }
+    }
+    val onShuffleAllLibrary = remember(viewModel) {
+        { viewModel.playAll(viewModel.libraryState.value.songs, shuffle = true) }
+    }
+    val onToggleFavorite = remember(viewModel) {
+        { songId: Long -> viewModel.toggleFavorite(songId) }
+    }
+    val onPlayNext = remember(viewModel) {
+        { song: com.example.data.model.Song -> viewModel.playerController.playNext(song) }
+    }
+    val onAddToQueue = remember(viewModel) {
+        { song: com.example.data.model.Song -> viewModel.playerController.addToQueue(song) }
+    }
+    val onAddToPlaylist = remember(viewModel) {
+        { song: com.example.data.model.Song -> viewModel.setSongForAddToPlaylist(song) }
+    }
+    val onRescanStorage = remember(viewModel) { { viewModel.refreshLibrary() } }
+    val onHomeAlbumClick = remember(viewModel) {
+        { album: com.example.data.model.Album ->
+            viewModel.setNavigationTab(NavigationTab.ALBUMS)
+            viewModel.selectAlbum(album)
+        }
+    }
+    val onAlbumSelect = remember(viewModel) {
+        { album: com.example.data.model.Album? -> viewModel.selectAlbum(album) }
+    }
+    val onArtistSelect = remember(viewModel) {
+        { artist: com.example.data.model.Artist? -> viewModel.selectArtist(artist) }
+    }
+    val onFolderSelect = remember(viewModel) {
+        { folder: com.example.data.model.Folder? -> viewModel.selectFolder(folder) }
+    }
+    val onPlaylistSelect = remember(viewModel) {
+        { playlist: com.example.data.model.Playlist? -> viewModel.selectPlaylist(playlist) }
+    }
+    val onCreatePlaylist = remember(viewModel) {
+        { name: String -> viewModel.createPlaylist(name) }
+    }
+    val onDeletePlaylist = remember(viewModel) {
+        { playlistId: Long -> viewModel.deletePlaylist(playlistId) }
+    }
+    val onAddSongsToPlaylist = remember(viewModel) {
+        { playlistId: Long, songIds: List<Long> -> viewModel.addSongsToPlaylist(playlistId, songIds) }
+    }
+    val onRemoveSongFromPlaylist = remember(viewModel) {
+        { playlistId: Long, songId: Long -> viewModel.removeSongFromPlaylist(playlistId, songId) }
+    }
+    val onClearFavorites = remember(viewModel) { { viewModel.clearFavorites() } }
+    val onThemeChange = remember(viewModel) { { mode: String -> viewModel.setThemeMode(mode) } }
+    val onResumeLastChange = remember(viewModel) { { enabled: Boolean -> viewModel.setResumeLastPlayback(enabled) } }
+    val onPauseOnHeadsetUnplugChange = remember(viewModel) { { enabled: Boolean -> viewModel.setPauseOnHeadsetUnplug(enabled) } }
+    val onNavigateToSongs = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.SONGS) } }
+    val onNavigateToAlbums = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.ALBUMS) } }
+    val onNavigateToPlaylists = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.PLAYLISTS) } }
+    val onNavigateToFavorites = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.FAVORITES) } }
+    val onNavigateToArtists = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.ARTISTS) } }
+    val onNavigateToSettings = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.SETTINGS) } }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -399,8 +478,8 @@ fun PulseMusicAppRoot(
                 AnimatedContent(
                     targetState = libraryState.selectedTab,
                     transitionSpec = {
-                        fadeIn(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)) togetherWith
-                            fadeOut(animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing))
+                        fadeIn(animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(animationSpec = tween(durationMillis = 110, easing = FastOutSlowInEasing))
                     },
                     label = "tab_transition"
                 ) { tab ->
@@ -410,25 +489,23 @@ fun PulseMusicAppRoot(
                                 songs = libraryState.songs,
                                 albums = libraryState.albums,
                                 favoriteSongs = favoriteSongs,
+                                favoriteIds = libraryState.favoriteIds,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onShuffleAll = { viewModel.playAll(libraryState.songs, shuffle = true) },
-                                onPlayAll = { viewModel.playAll(libraryState.songs, shuffle = false) },
-                                onAlbumClick = { album ->
-                                    viewModel.setNavigationTab(NavigationTab.ALBUMS)
-                                    viewModel.selectAlbum(album)
-                                },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) },
-                                onNavigateToSongs = { viewModel.setNavigationTab(NavigationTab.SONGS) },
-                                onNavigateToAlbums = { viewModel.setNavigationTab(NavigationTab.ALBUMS) },
-                                onNavigateToPlaylists = { viewModel.setNavigationTab(NavigationTab.PLAYLISTS) },
-                                onNavigateToFavorites = { viewModel.setNavigationTab(NavigationTab.FAVORITES) },
-                                onNavigateToArtists = { viewModel.setNavigationTab(NavigationTab.ARTISTS) },
-                                onNavigateToSettings = { viewModel.setNavigationTab(NavigationTab.SETTINGS) },
+                                onSongClick = onSongClick,
+                                onShuffleAll = onShuffleAllLibrary,
+                                onPlayAll = onPlayAllLibrary,
+                                onAlbumClick = onHomeAlbumClick,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist,
+                                onNavigateToSongs = onNavigateToSongs,
+                                onNavigateToAlbums = onNavigateToAlbums,
+                                onNavigateToPlaylists = onNavigateToPlaylists,
+                                onNavigateToFavorites = onNavigateToFavorites,
+                                onNavigateToArtists = onNavigateToArtists,
+                                onNavigateToSettings = onNavigateToSettings,
                                 playlistCount = libraryState.playlists.size,
                                 artistCount = libraryState.artists.size
                             )
@@ -441,14 +518,16 @@ fun PulseMusicAppRoot(
                                 favoriteIds = libraryState.favoriteIds,
                                 currentPlayingSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onPlayAll = { viewModel.playAll(it, shuffle = false) },
-                                onShuffleAll = { viewModel.playAll(it, shuffle = true) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) },
-                                onRescanStorage = { viewModel.refreshLibrary() }
+                                totalDurationFormatted = libraryState.totalDurationFormatted,
+                                totalStorageFormatted = libraryState.totalStorageFormatted,
+                                onSongClick = onSongClick,
+                                onPlayAll = onPlayAllList,
+                                onShuffleAll = onShuffleAllList,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist,
+                                onRescanStorage = onRescanStorage
                             )
                         }
 
@@ -461,17 +540,17 @@ fun PulseMusicAppRoot(
                                 favoriteIds = libraryState.favoriteIds,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onPlaylistSelect = { viewModel.selectPlaylist(it) },
-                                onCreatePlaylist = { viewModel.createPlaylist(it) },
-                                onDeletePlaylist = { viewModel.deletePlaylist(it) },
-                                onAddSongsToPlaylist = { playlistId, songIds -> viewModel.addSongsToPlaylist(playlistId, songIds) },
-                                onRemoveSongFromPlaylist = { playlistId, songId -> viewModel.removeSongFromPlaylist(playlistId, songId) },
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onPlayAll = { viewModel.playAll(it, shuffle = false) },
-                                onShuffleAll = { viewModel.playAll(it, shuffle = true) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) }
+                                onPlaylistSelect = onPlaylistSelect,
+                                onCreatePlaylist = onCreatePlaylist,
+                                onDeletePlaylist = onDeletePlaylist,
+                                onAddSongsToPlaylist = onAddSongsToPlaylist,
+                                onRemoveSongFromPlaylist = onRemoveSongFromPlaylist,
+                                onSongClick = onSongClick,
+                                onPlayAll = onPlayAllList,
+                                onShuffleAll = onShuffleAllList,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue
                             )
                         }
 
@@ -479,18 +558,19 @@ fun PulseMusicAppRoot(
                             AlbumsScreen(
                                 albums = libraryState.albums,
                                 allSongs = libraryState.songs,
+                                songsByAlbum = libraryState.songsByAlbum,
                                 selectedAlbum = libraryState.selectedAlbum,
                                 favoriteIds = libraryState.favoriteIds,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onAlbumSelect = { viewModel.selectAlbum(it) },
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onPlayAll = { viewModel.playAll(it, shuffle = false) },
-                                onShuffleAll = { viewModel.playAll(it, shuffle = true) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) }
+                                onAlbumSelect = onAlbumSelect,
+                                onSongClick = onSongClick,
+                                onPlayAll = onPlayAllList,
+                                onShuffleAll = onShuffleAllList,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist
                             )
                         }
 
@@ -498,18 +578,19 @@ fun PulseMusicAppRoot(
                             ArtistsScreen(
                                 artists = libraryState.artists,
                                 allSongs = libraryState.songs,
+                                songsByArtist = libraryState.songsByArtist,
                                 selectedArtist = libraryState.selectedArtist,
                                 favoriteIds = libraryState.favoriteIds,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onArtistSelect = { viewModel.selectArtist(it) },
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onPlayAll = { viewModel.playAll(it, shuffle = false) },
-                                onShuffleAll = { viewModel.playAll(it, shuffle = true) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) }
+                                onArtistSelect = onArtistSelect,
+                                onSongClick = onSongClick,
+                                onPlayAll = onPlayAllList,
+                                onShuffleAll = onShuffleAllList,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist
                             )
                         }
 
@@ -517,18 +598,19 @@ fun PulseMusicAppRoot(
                             FoldersScreen(
                                 folders = libraryState.folders,
                                 allSongs = libraryState.songs,
+                                songsByFolder = libraryState.songsByFolder,
                                 selectedFolder = libraryState.selectedFolder,
                                 favoriteIds = libraryState.favoriteIds,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onFolderSelect = { viewModel.selectFolder(it) },
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onPlayAll = { viewModel.playAll(it, shuffle = false) },
-                                onShuffleAll = { viewModel.playAll(it, shuffle = true) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) }
+                                onFolderSelect = onFolderSelect,
+                                onSongClick = onSongClick,
+                                onPlayAll = onPlayAllList,
+                                onShuffleAll = onShuffleAllList,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist
                             )
                         }
 
@@ -537,26 +619,26 @@ fun PulseMusicAppRoot(
                                 favoriteSongs = favoriteSongs,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
-                                onSongClick = { song, queue -> viewModel.playSongFromList(song, queue) },
-                                onPlayAll = { viewModel.playAll(it, shuffle = false) },
-                                onShuffleAll = { viewModel.playAll(it, shuffle = true) },
-                                onToggleFavorite = { viewModel.toggleFavorite(it) },
-                                onClearFavorites = { viewModel.clearFavorites() },
-                                onPlayNext = { viewModel.playerController.playNext(it) },
-                                onAddToQueue = { viewModel.playerController.addToQueue(it) },
-                                onAddToPlaylist = { viewModel.setSongForAddToPlaylist(it) }
+                                onSongClick = onSongClick,
+                                onPlayAll = onPlayAllList,
+                                onShuffleAll = onShuffleAllList,
+                                onToggleFavorite = onToggleFavorite,
+                                onClearFavorites = onClearFavorites,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist
                             )
                         }
 
                         NavigationTab.SETTINGS -> {
                             SettingsScreen(
                                 currentTheme = libraryState.userThemePreference,
-                                onThemeChange = { viewModel.setThemeMode(it) },
-                                onClearFavorites = { viewModel.clearFavorites() },
+                                onThemeChange = onThemeChange,
+                                onClearFavorites = onClearFavorites,
                                 resumeLastPlayback = libraryState.resumeLastPlayback,
-                                onResumeLastChange = { viewModel.setResumeLastPlayback(it) },
+                                onResumeLastChange = onResumeLastChange,
                                 autoPauseOnHeadsetUnplug = libraryState.pauseOnHeadsetUnplug,
-                                onPauseOnHeadsetUnplugChange = { viewModel.setPauseOnHeadsetUnplug(it) }
+                                onPauseOnHeadsetUnplugChange = onPauseOnHeadsetUnplugChange
                             )
                         }
                     }

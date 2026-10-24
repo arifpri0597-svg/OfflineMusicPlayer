@@ -249,7 +249,7 @@ fun NowPlayingScreen(
                     .background(ArtworkBackdropBrush),
                 contentAlignment = Alignment.Center
             ) {
-                NowPlayingHeroArtwork(albumArtUri = song.albumArtUri)
+                NowPlayingHeroArtwork(albumArtUriString = song.albumArtUri?.toString())
             }
 
             // 3. Song Information (Centered title & Artist underneath)
@@ -1144,18 +1144,19 @@ private fun NowPlayingTopBar(
 
 @Composable
 private fun NowPlayingHeroArtwork(
-    albumArtUri: android.net.Uri?
+    albumArtUriString: String?
 ) {
     val context = LocalContext.current
-    if (albumArtUri != null) {
-        val heroImageRequest = remember(albumArtUri) {
-            val key = "hero_$albumArtUri"
+    if (!albumArtUriString.isNullOrBlank()) {
+        val heroImageRequest = remember(albumArtUriString) {
+            val key = "hero_$albumArtUriString"
             ImageRequest.Builder(context)
-                .data(albumArtUri)
+                .data(albumArtUriString)
                 .memoryCacheKey(key)
                 .diskCacheKey(key)
                 .crossfade(false)
                 .size(512, 512)
+                .precision(coil.size.Precision.INEXACT)
                 .build()
         }
         AsyncImage(

@@ -104,7 +104,7 @@ class PlaybackStateRepository(
      */
     fun savePlaybackStateImmediate(state: PlaybackStateEntity) {
         val sanitized = sanitizeState(state) ?: return
-        writeBackupPrefs(sanitized, commitSynchronously = true)
+        writeBackupPrefs(sanitized, commitSynchronously = false)
         repositoryScope.launch(NonCancellable) {
             try {
                 musicDao.upsertPlaybackState(sanitized)

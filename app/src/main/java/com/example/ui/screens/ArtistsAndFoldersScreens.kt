@@ -46,6 +46,7 @@ import com.example.ui.components.SongItemRow
 fun ArtistsScreen(
     artists: List<Artist>,
     allSongs: List<Song>,
+    songsByArtist: Map<String, List<Song>> = emptyMap(),
     selectedArtist: Artist?,
     favoriteIds: Set<Long>,
     currentSongId: Long?,
@@ -65,8 +66,9 @@ fun ArtistsScreen(
             onArtistSelect(null)
         }
 
-        val artistSongs = remember(selectedArtist, allSongs) {
-            allSongs.filter { it.artist.equals(selectedArtist.name, ignoreCase = true) }
+        val artistSongs = remember(selectedArtist, songsByArtist, allSongs) {
+            songsByArtist[selectedArtist.name.lowercase(java.util.Locale.ROOT)]
+                ?: allSongs.filter { it.artist.equals(selectedArtist.name, ignoreCase = true) }
         }
 
         LazyColumn(
@@ -75,7 +77,7 @@ fun ArtistsScreen(
                 .testTag("artist_detail_screen"),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item {
+            item(key = "artist_detail_header", contentType = "header") {
                 Column(modifier = Modifier.padding(16.dp)) {
                     IconButton(
                         onClick = { onArtistSelect(null) },
@@ -172,6 +174,7 @@ fun ArtistsScreen(
 fun FoldersScreen(
     folders: List<Folder>,
     allSongs: List<Song>,
+    songsByFolder: Map<String, List<Song>> = emptyMap(),
     selectedFolder: Folder?,
     favoriteIds: Set<Long>,
     currentSongId: Long?,
@@ -191,8 +194,9 @@ fun FoldersScreen(
             onFolderSelect(null)
         }
 
-        val folderSongs = remember(selectedFolder, allSongs) {
-            allSongs.filter { it.folderName.equals(selectedFolder.name, ignoreCase = true) }
+        val folderSongs = remember(selectedFolder, songsByFolder, allSongs) {
+            songsByFolder[selectedFolder.name.lowercase(java.util.Locale.ROOT)]
+                ?: allSongs.filter { it.folderName.equals(selectedFolder.name, ignoreCase = true) }
         }
 
         LazyColumn(
@@ -201,7 +205,7 @@ fun FoldersScreen(
                 .testTag("folder_detail_screen"),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item {
+            item(key = "folder_detail_header", contentType = "header") {
                 Column(modifier = Modifier.padding(16.dp)) {
                     IconButton(
                         onClick = { onFolderSelect(null) },

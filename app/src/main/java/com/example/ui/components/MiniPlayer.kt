@@ -134,7 +134,7 @@ fun MiniPlayer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     MiniPlayerArtwork(
-                        albumArtUri = song.albumArtUri,
+                        albumArtUriString = song.albumArtUri?.toString(),
                         isBuffering = playerState.isBuffering
                     )
 
@@ -187,7 +187,7 @@ fun MiniPlayer(
 
 @Composable
 private fun MiniPlayerArtwork(
-    albumArtUri: android.net.Uri?,
+    albumArtUriString: String?,
     isBuffering: Boolean
 ) {
     val context = LocalContext.current
@@ -202,15 +202,16 @@ private fun MiniPlayerArtwork(
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (albumArtUri != null) {
-            val imageRequest = remember(albumArtUri) {
-                val key = "thumb_$albumArtUri"
+        if (!albumArtUriString.isNullOrBlank()) {
+            val imageRequest = remember(albumArtUriString) {
+                val key = "thumb_$albumArtUriString"
                 ImageRequest.Builder(context)
-                    .data(albumArtUri)
+                    .data(albumArtUriString)
                     .memoryCacheKey(key)
                     .diskCacheKey(key)
                     .crossfade(false)
                     .size(144, 144)
+                    .precision(coil.size.Precision.INEXACT)
                     .build()
             }
             AsyncImage(

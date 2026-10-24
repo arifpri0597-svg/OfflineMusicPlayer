@@ -19,18 +19,20 @@ data class PlayerUiState(
     val isBuffering: Boolean = false,
     val errorMessage: String? = null
 ) {
-    val progress: Float =
-        if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    val progress: Float
+        get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 
-    val formattedPosition: String =
-        if (positionMs <= 0L) "0:00" else Song.formatDurationMs(positionMs)
+    val formattedPosition: String
+        get() = if (positionMs <= 0L) "0:00" else Song.formatDurationMs(positionMs)
 
-    val formattedDuration: String =
-        if (durationMs <= 0L) "--:--" else Song.formatDurationMs(durationMs)
+    val formattedDuration: String
+        get() = if (durationMs <= 0L) "--:--" else Song.formatDurationMs(durationMs)
 
-    val formattedPlaybackSpeed: String = formatSpeed(playbackSpeed)
+    val formattedPlaybackSpeed: String
+        get() = formatSpeed(playbackSpeed)
 
-    val formattedPlaybackSpeedButton: String = formatSpeedButtonLabel(playbackSpeed)
+    val formattedPlaybackSpeedButton: String
+        get() = formatSpeedButtonLabel(playbackSpeed)
 
     companion object {
         val PLAYBACK_SPEED_OPTIONS: List<Float> = listOf(

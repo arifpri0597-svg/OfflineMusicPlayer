@@ -85,6 +85,8 @@ fun ScannedAudioListScreen(
     favoriteIds: Set<Long>,
     currentPlayingSongId: Long?,
     isPlaying: Boolean,
+    totalDurationFormatted: String = "",
+    totalStorageFormatted: String = "",
     onSongClick: (Song, List<Song>) -> Unit,
     onPlayAll: (List<Song>) -> Unit,
     onShuffleAll: (List<Song>) -> Unit,
@@ -121,8 +123,10 @@ fun ScannedAudioListScreen(
         }
     }
 
-    val totalDurationFormatted by remember(songs) {
-        derivedStateOf {
+    val effectiveDurationFormatted = remember(songs, totalDurationFormatted) {
+        if (totalDurationFormatted.isNotBlank()) {
+            totalDurationFormatted
+        } else {
             val totalSeconds = songs.sumOf { it.durationMs } / 1000
             val hours = totalSeconds / 3600
             val minutes = (totalSeconds % 3600) / 60
@@ -130,14 +134,16 @@ fun ScannedAudioListScreen(
         }
     }
 
-    val totalStorageFormatted by remember(songs) {
-        derivedStateOf {
+    val effectiveStorageFormatted = remember(songs, totalStorageFormatted) {
+        if (totalStorageFormatted.isNotBlank()) {
+            totalStorageFormatted
+        } else {
             val totalBytes = songs.sumOf { it.sizeBytes }
             val mb = totalBytes.toDouble() / (1024 * 1024)
             if (mb >= 1024) {
-                String.format("%.2f GB", mb / 1024)
+                String.format(java.util.Locale.US, "%.2f GB", mb / 1024)
             } else {
-                String.format("%.1f MB", mb)
+                String.format(java.util.Locale.US, "%.1f MB", mb)
             }
         }
     }
@@ -183,7 +189,7 @@ fun ScannedAudioListScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${songs.size} tracks from database • $totalDurationFormatted • $totalStorageFormatted",
+                        text = "${songs.size} tracks from database • $effectiveDurationFormatted • $effectiveStorageFormatted",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -294,7 +300,7 @@ fun ScannedAudioListScreen(
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
                     // Quick Action Row: Play All & Shuffle All
-                    item {
+                    item(key = "scanned_quick_actions", contentType = "quick_actions") {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -401,6 +407,7 @@ private fun ScannedAudioItemRow(
                             .diskCacheKey(key)
                             .crossfade(false)
                             .size(144, 144)
+                            .precision(coil.size.Precision.INEXACT)
                             .build()
                     }
                     AsyncImage(
@@ -468,7 +475,7 @@ private fun ScannedAudioItemRow(
                 )
             }
 
-            // Overflow Options Menu
+            // Overflow Options Menu (only compose DropdownMenu popup when open)
             Box {
                 IconButton(
                     onClick = { menuOpen = true },
@@ -481,34 +488,36 @@ private fun ScannedAudioItemRow(
                     )
                 }
 
-                DropdownMenu(
-                    expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Play Next") },
-                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                        onClick = {
-                            menuOpen = false
-                            onPlayNext()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to Queue") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
-                        onClick = {
-                            menuOpen = false
-                            onAddToQueue()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to Playlist") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
-                        onClick = {
-                            menuOpen = false
-                            onAddToPlaylist()
-                        }
-                    )
+                if (menuOpen) {
+                    DropdownMenu(
+                        expanded = true,
+                        onDismissRequest = { menuOpen = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Play Next") },
+                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onPlayNext()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to Queue") },
+                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onAddToQueue()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to Playlist") },
+                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onAddToPlaylist()
+                            }
+                        )
+                    }
                 }
             }
         }

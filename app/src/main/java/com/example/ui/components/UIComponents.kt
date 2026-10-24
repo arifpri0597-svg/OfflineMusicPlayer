@@ -161,6 +161,7 @@ fun SongItemRow(
                             .diskCacheKey(key)
                             .crossfade(false)
                             .size(144, 144)
+                            .precision(coil.size.Precision.INEXACT)
                             .build()
                     }
                     AsyncImage(
@@ -243,7 +244,7 @@ fun SongItemRow(
                 )
             }
 
-            // More Options Menu
+            // More Options Menu (only compose DropdownMenu popup when expanded)
             Box {
                 IconButton(
                     onClick = { menuExpanded = true },
@@ -258,34 +259,36 @@ fun SongItemRow(
                         modifier = Modifier.size(20.dp)
                     )
                 }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Play Next") },
-                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonPink) },
-                        onClick = {
-                            menuExpanded = false
-                            onPlayNext()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to Queue") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPurple) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToQueue()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to Playlist") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPink) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToPlaylist()
-                        }
-                    )
+                if (menuExpanded) {
+                    DropdownMenu(
+                        expanded = true,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Play Next") },
+                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonPink) },
+                            onClick = {
+                                menuExpanded = false
+                                onPlayNext()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to Queue") },
+                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPurple) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToQueue()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to Playlist") },
+                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPink) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToPlaylist()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -321,13 +324,14 @@ fun AlbumCard(
             ) {
                 if (album.artworkUri != null) {
                     val imageRequest = remember(album.artworkUri) {
-                        val key = "album_card_${album.artworkUri}"
+                        val key = "album_${album.artworkUri}"
                         ImageRequest.Builder(context)
                             .data(album.artworkUri)
                             .memoryCacheKey(key)
                             .diskCacheKey(key)
                             .crossfade(false)
                             .size(256, 256)
+                            .precision(coil.size.Precision.INEXACT)
                             .build()
                     }
                     AsyncImage(

@@ -129,6 +129,7 @@ fun HomeScreen(
     songs: List<Song>,
     albums: List<Album>,
     favoriteSongs: List<Song>,
+    favoriteIds: Set<Long> = emptySet(),
     currentSongId: Long?,
     isPlaying: Boolean,
     onSongClick: (Song, List<Song>) -> Unit,
@@ -190,8 +191,12 @@ fun HomeScreen(
             }
         }
     }
-    val favoriteIdSet = remember(favoriteSongs) {
-        favoriteSongs.mapTo(HashSet(favoriteSongs.size)) { it.id }
+    val favoriteIdSet = remember(favoriteIds, favoriteSongs) {
+        if (favoriteIds.isNotEmpty() || favoriteSongs.isEmpty()) {
+            favoriteIds
+        } else {
+            favoriteSongs.mapTo(HashSet(favoriteSongs.size)) { it.id }
+        }
     }
 
     LazyColumn(
@@ -800,6 +805,7 @@ private fun HomeAlbumCard(
                             .diskCacheKey(key)
                             .crossfade(false)
                             .size(256, 256)
+                            .precision(coil.size.Precision.INEXACT)
                             .build()
                     }
                     AsyncImage(
