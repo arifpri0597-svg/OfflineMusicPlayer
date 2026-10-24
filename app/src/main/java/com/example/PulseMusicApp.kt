@@ -43,9 +43,6 @@ class PulseMusicApp : Application(), ImageLoaderFactory {
         val ioDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4)
         val decodeDispatcher = kotlinx.coroutines.Dispatchers.Default.limitedParallelism(2)
         return ImageLoader.Builder(this)
-            .components {
-                add(com.example.ui.components.ArtworkCacheManager.NegativeCacheInterceptor())
-            }
             .fetcherDispatcher(ioDispatcher)
             .decoderDispatcher(decodeDispatcher)
             .transformationDispatcher(decodeDispatcher)

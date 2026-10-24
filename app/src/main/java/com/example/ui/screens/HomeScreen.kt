@@ -166,6 +166,7 @@ fun HomeScreen(
                         colors = listOf(DarkBackgroundSecondary, DarkBackground)
                     )
                 )
+                .testTag("home_screen")
         ) {
             PureTuneTopHeader(
                 onSearchClick = onNavigateToSongs,
@@ -698,7 +699,7 @@ private fun PureTuneHeroBanner(
                     val width = size.width
                     val height = size.height
                     val glowCenter = Offset(width * 0.82f, height * 0.5f)
-                    val glowRadius = height * 0.9f
+                    val glowRadius = (height * 0.9f).coerceAtLeast(1f)
                     val glowBrush = Brush.radialGradient(
                         colors = listOf(
                             NeonPink.copy(alpha = 0.36f),
@@ -717,6 +718,7 @@ private fun PureTuneHeroBanner(
                     val barCorner = CornerRadius(barWidth / 2f, barWidth / 2f)
 
                     onDrawBehind {
+                        if (width <= 0f || height <= 0f) return@onDrawBehind
                         drawCircle(
                             brush = glowBrush,
                             center = glowCenter,

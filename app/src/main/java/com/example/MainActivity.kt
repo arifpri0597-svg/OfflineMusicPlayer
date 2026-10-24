@@ -82,7 +82,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        configureHighRefreshRateDisplay()
+
+        val initialGranted = checkAudioPermission()
+        viewModel.onPermissionResult(initialGranted)
 
         if (savedInstanceState == null) {
             handleIncomingIntent(intent)
@@ -105,52 +107,6 @@ class MainActivity : ComponentActivity() {
                     onRequestPermission = { checkAndRequestPermissions() }
                 )
             }
-        }
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            configureHighRefreshRateDisplay()
-        }
-    }
-
-    /**
-     * Negotiates the highest available display refresh rate (60Hz / 90Hz / 120Hz+)
-     * matching the active physical resolution so animations and scrolling run at peak smoothness.
-     */
-    internal fun configureHighRefreshRateDisplay() {
-        try {
-            val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display
-            } else {
-                @Suppress("DEPRECATION")
-                windowManager.defaultDisplay
-            } ?: return
-
-            val supportedModes = currentDisplay.supportedModes
-            if (supportedModes.isNullOrEmpty()) return
-
-            val currentMode = currentDisplay.mode
-            val bestMode = supportedModes
-                .filter {
-                    it.physicalWidth == currentMode.physicalWidth &&
-                        it.physicalHeight == currentMode.physicalHeight
-                }
-                .maxByOrNull { it.refreshRate }
-                ?: supportedModes.maxByOrNull { it.refreshRate }
-                ?: return
-
-            val layoutParams = window.attributes
-            if (layoutParams.preferredDisplayModeId != bestMode.modeId ||
-                layoutParams.preferredRefreshRate != bestMode.refreshRate
-            ) {
-                layoutParams.preferredDisplayModeId = bestMode.modeId
-                layoutParams.preferredRefreshRate = bestMode.refreshRate
-                window.attributes = layoutParams
-            }
-        } catch (_: Exception) {
-            // Safely ignore on environments/tests without WindowManager display modes
         }
     }
 
@@ -198,20 +154,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        configureHighRefreshRateDisplay()
-        // Re-check permissions on resume (e.g., if user returned from Settings)
+        // Re-check permissions on resume (e.g., if user returned from Settings or permission dialog)
         val hasPermission = checkAudioPermission()
         viewModel.onPermissionResult(hasPermission)
     }
 
     override fun onPause() {
         super.onPause()
-        viewModel.savePlaybackStateNow()
+        if (viewModel.libraryState.value.hasPermission || viewModel.playerUiState.value.currentSong != null) {
+            viewModel.savePlaybackStateNow()
+        }
     }
 
     override fun onStop() {
         super.onStop()
-        viewModel.savePlaybackStateNow()
+        if (viewModel.libraryState.value.hasPermission || viewModel.playerUiState.value.currentSong != null) {
+            viewModel.savePlaybackStateNow()
+        }
     }
 
     private fun checkAudioPermission(): Boolean {

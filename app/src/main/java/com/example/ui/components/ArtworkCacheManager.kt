@@ -111,72 +111,62 @@ fun FastArtworkImage(
     contentScale: ContentScale = ContentScale.Crop,
     fallback: @Composable () -> Unit
 ) {
+    val context = LocalContext.current
+    val safeSizePx = sizePx.coerceAtLeast(64)
     val uriString = remember(artworkUri) {
         artworkUri?.toString()?.takeIf { it.isNotBlank() }
     }
-
-    if (uriString == null || ArtworkCacheManager.isKnownMissing(uriString)) {
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-            fallback()
-        }
-        return
-    }
-
     var isMissing by remember(uriString) {
-        mutableStateOf(ArtworkCacheManager.isKnownMissing(uriString))
+        mutableStateOf(uriString == null || ArtworkCacheManager.isKnownMissing(uriString))
     }
     var isLoaded by remember(uriString) {
-        mutableStateOf(ArtworkCacheManager.isVerified(uriString))
+        mutableStateOf(uriString != null && ArtworkCacheManager.isVerified(uriString))
     }
 
-    if (isMissing) {
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-            fallback()
+    val imageRequest = remember(uriString, cacheKeyPrefix, safeSizePx) {
+        if (uriString == null || ArtworkCacheManager.isKnownMissing(uriString)) {
+            null
+        } else {
+            runCatching {
+                val key = "${cacheKeyPrefix}_${safeSizePx}_$uriString"
+                ImageRequest.Builder(context)
+                    .data(artworkUri)
+                    .memoryCacheKey(key)
+                    .diskCacheKey(key)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .crossfade(false)
+                    .size(safeSizePx, safeSizePx)
+                    .precision(Precision.INEXACT)
+                    .build()
+            }.getOrNull()
         }
-        return
-    }
-
-    val context = LocalContext.current
-    val imageRequest = remember(uriString, cacheKeyPrefix, sizePx) {
-        val key = "${cacheKeyPrefix}_${sizePx}_$uriString"
-        ImageRequest.Builder(context)
-            .data(artworkUri)
-            .memoryCacheKey(key)
-            .diskCacheKey(key)
-            .memoryCachePolicy(CachePolicy.ENABLED)
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .crossfade(false)
-            .size(sizePx, sizePx)
-            .precision(Precision.INEXACT)
-            .build()
     }
 
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        if (!isLoaded) {
+        if (uriString == null || isMissing || imageRequest == null) {
             fallback()
-        }
-        AsyncImage(
-            model = imageRequest,
-            contentDescription = contentDescription,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = contentScale,
-            onSuccess = {
-                isLoaded = true
-                ArtworkCacheManager.markVerified(uriString)
-            },
-            onError = {
-                isMissing = true
-                ArtworkCacheManager.markMissing(uriString)
+        } else {
+            if (!isLoaded) {
+                fallback()
             }
-        )
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale,
+                onSuccess = {
+                    isLoaded = true
+                    ArtworkCacheManager.markVerified(uriString)
+                },
+                onError = {
+                    isMissing = true
+                    ArtworkCacheManager.markMissing(uriString)
+                }
+            )
+        }
     }
 }

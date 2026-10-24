@@ -142,7 +142,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         observePreferences()
-        ensureDatabaseObserversStarted()
     }
 
     /**
@@ -182,167 +181,214 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observeSongsFromDatabase() {
         viewModelScope.launch(Dispatchers.Default) {
-            audioScanRepository.getBaseSongsFlow().collect { songsList ->
-                val currentSongIds = songsList.map { it.id }
-                val currentState = _libraryState.value
-                val favIds = currentState.favoriteIds
-                val favSongs = if (favIds.isEmpty()) emptyList() else songsList.filter { favIds.contains(it.id) }
-                val displayed = computeDisplayedSongs(songsList, currentState.searchQuery, currentState.sortOrder)
-                val homeTracks = songsList.take(15)
-                val homeFavs = favSongs.take(5)
+            try {
+                audioScanRepository.getBaseSongsFlow().collect { songsList ->
+                    try {
+                        val currentSongIds = songsList.map { it.id }
+                        val currentState = _libraryState.value
+                        val favIds = currentState.favoriteIds
+                        val favSongs = if (favIds.isEmpty()) emptyList() else songsList.filter { favIds.contains(it.id) }
+                        val displayed = computeDisplayedSongs(songsList, currentState.searchQuery, currentState.sortOrder)
+                        val homeTracks = songsList.take(15)
+                        val homeFavs = favSongs.take(5)
 
-                if (currentSongIds != lastGroupedSongIds || (songsList.isEmpty() && currentState.albums.isNotEmpty())) {
-                    lastGroupedSongIds = currentSongIds
-                    coroutineScope {
-                        val albumsDeferred = async { audioScanRepository.getAlbums(songsList) }
-                        val artistsDeferred = async { audioScanRepository.getArtists(songsList) }
-                        val foldersDeferred = async { audioScanRepository.getFolders(songsList) }
-                        val byAlbumDeferred = async {
-                            songsList.groupBy { it.album.lowercase(java.util.Locale.ROOT) }
-                        }
-                        val byArtistDeferred = async {
-                            songsList.groupBy { it.artist.lowercase(java.util.Locale.ROOT) }
-                        }
-                        val byFolderDeferred = async {
-                            songsList.groupBy { it.folderName.lowercase(java.util.Locale.ROOT) }
-                        }
-                        val statsDeferred = async {
-                            val totalSeconds = songsList.sumOf { it.durationMs } / 1000L
-                            val hours = totalSeconds / 3600L
-                            val minutes = (totalSeconds % 3600L) / 60L
-                            val durStr = if (hours > 0L) "${hours}h ${minutes}m" else "${minutes}m"
+                        if (currentSongIds != lastGroupedSongIds || (songsList.isEmpty() && currentState.albums.isNotEmpty())) {
+                            lastGroupedSongIds = currentSongIds
+                            coroutineScope {
+                                val albumsDeferred = async { audioScanRepository.getAlbums(songsList) }
+                                val artistsDeferred = async { audioScanRepository.getArtists(songsList) }
+                                val foldersDeferred = async { audioScanRepository.getFolders(songsList) }
+                                val byAlbumDeferred = async {
+                                    songsList.groupBy { it.album.lowercase(java.util.Locale.ROOT) }
+                                }
+                                val byArtistDeferred = async {
+                                    songsList.groupBy { it.artist.lowercase(java.util.Locale.ROOT) }
+                                }
+                                val byFolderDeferred = async {
+                                    songsList.groupBy { it.folderName.lowercase(java.util.Locale.ROOT) }
+                                }
+                                val statsDeferred = async {
+                                    val totalSeconds = songsList.sumOf { it.durationMs } / 1000L
+                                    val hours = totalSeconds / 3600L
+                                    val minutes = (totalSeconds % 3600L) / 60L
+                                    val durStr = if (hours > 0L) "${hours}h ${minutes}m" else "${minutes}m"
 
-                            val totalBytes = songsList.sumOf { it.sizeBytes }
-                            val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
-                            val sizeStr = if (mb >= 1024.0) {
-                                String.format(java.util.Locale.US, "%.2f GB", mb / 1024.0)
-                            } else {
-                                String.format(java.util.Locale.US, "%.1f MB", mb)
+                                    val totalBytes = songsList.sumOf { it.sizeBytes }
+                                    val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
+                                    val sizeStr = if (mb >= 1024.0) {
+                                        String.format(java.util.Locale.US, "%.2f GB", mb / 1024.0)
+                                    } else {
+                                        String.format(java.util.Locale.US, "%.1f MB", mb)
+                                    }
+                                    durStr to sizeStr
+                                }
+
+                                val albums = albumsDeferred.await()
+                                val artists = artistsDeferred.await()
+                                val folders = foldersDeferred.await()
+                                val byAlbum = byAlbumDeferred.await()
+                                val byArtist = byArtistDeferred.await()
+                                val byFolder = byFolderDeferred.await()
+                                val (durStr, sizeStr) = statsDeferred.await()
+                                val homeAlbums = albums.take(10)
+
+                                _libraryState.update { state ->
+                                    val latestFavIds = state.favoriteIds
+                                    val latestFavSongs = if (latestFavIds === favIds) {
+                                        favSongs
+                                    } else if (latestFavIds.isEmpty()) {
+                                        emptyList()
+                                    } else {
+                                        songsList.filter { latestFavIds.contains(it.id) }
+                                    }
+                                    val latestDisplayed = if (state.searchQuery == currentState.searchQuery &&
+                                        state.sortOrder == currentState.sortOrder
+                                    ) {
+                                        displayed
+                                    } else {
+                                        computeDisplayedSongs(songsList, state.searchQuery, state.sortOrder)
+                                    }
+                                    state.copy(
+                                        songs = songsList,
+                                        displayedSongs = latestDisplayed,
+                                        albums = albums,
+                                        artists = artists,
+                                        folders = folders,
+                                        favoriteSongs = latestFavSongs,
+                                        homeAlbumsPreview = homeAlbums,
+                                        homeFavoritesPreview = latestFavSongs.take(5),
+                                        homeTracksPreview = homeTracks,
+                                        songsByAlbum = byAlbum,
+                                        songsByArtist = byArtist,
+                                        songsByFolder = byFolder,
+                                        totalDurationFormatted = durStr,
+                                        totalStorageFormatted = sizeStr
+                                    )
+                                }
                             }
-                            durStr to sizeStr
-                        }
-                        launch { playerController.prewarmMediaItems(songsList) }
-
-                        val albums = albumsDeferred.await()
-                        val artists = artistsDeferred.await()
-                        val folders = foldersDeferred.await()
-                        val byAlbum = byAlbumDeferred.await()
-                        val byArtist = byArtistDeferred.await()
-                        val byFolder = byFolderDeferred.await()
-                        val (durStr, sizeStr) = statsDeferred.await()
-                        val homeAlbums = albums.take(10)
-
-                        _libraryState.update { state ->
-                            val latestFavIds = state.favoriteIds
-                            val latestFavSongs = if (latestFavIds === favIds) {
-                                favSongs
-                            } else if (latestFavIds.isEmpty()) {
-                                emptyList()
-                            } else {
-                                songsList.filter { latestFavIds.contains(it.id) }
+                        } else {
+                            _libraryState.update { state ->
+                                state.copy(
+                                    songs = songsList,
+                                    displayedSongs = displayed,
+                                    favoriteSongs = favSongs,
+                                    homeFavoritesPreview = homeFavs,
+                                    homeTracksPreview = homeTracks
+                                )
                             }
-                            val latestDisplayed = if (state.searchQuery == currentState.searchQuery &&
-                                state.sortOrder == currentState.sortOrder
-                            ) {
-                                displayed
-                            } else {
-                                computeDisplayedSongs(songsList, state.searchQuery, state.sortOrder)
-                            }
-                            state.copy(
-                                songs = songsList,
-                                displayedSongs = latestDisplayed,
-                                albums = albums,
-                                artists = artists,
-                                folders = folders,
-                                favoriteSongs = latestFavSongs,
-                                homeAlbumsPreview = homeAlbums,
-                                homeFavoritesPreview = latestFavSongs.take(5),
-                                homeTracksPreview = homeTracks,
-                                songsByAlbum = byAlbum,
-                                songsByArtist = byArtist,
-                                songsByFolder = byFolder,
-                                totalDurationFormatted = durStr,
-                                totalStorageFormatted = sizeStr
-                            )
                         }
-                    }
-                } else {
-                    _libraryState.update { state ->
-                        state.copy(
-                            songs = songsList,
-                            displayedSongs = displayed,
-                            favoriteSongs = favSongs,
-                            homeFavoritesPreview = homeFavs,
-                            homeTracksPreview = homeTracks
-                        )
+                        if (songsList.isNotEmpty() &&
+                            _libraryState.value.resumeLastPlayback &&
+                            hasAttemptedInitialRestore.compareAndSet(false, true)
+                        ) {
+                            try {
+                                playerController.restorePlaybackState(songsList)
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
                 }
-                if (songsList.isNotEmpty() &&
-                    _libraryState.value.resumeLastPlayback &&
-                    hasAttemptedInitialRestore.compareAndSet(false, true)
-                ) {
-                    playerController.restorePlaybackState(songsList)
-                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
 
     private fun observeFavorites() {
         viewModelScope.launch(Dispatchers.Default) {
-            musicDao.getAllFavoriteIds()
-                .distinctUntilChanged()
-                .map { it.toHashSet() }
-                .collect { favSet ->
-                    val currentSongs = _libraryState.value.songs
-                    val favSongs = if (favSet.isEmpty() || currentSongs.isEmpty()) {
-                        emptyList()
-                    } else {
-                        currentSongs.filter { favSet.contains(it.id) }
+            try {
+                musicDao.getAllFavoriteIds()
+                    .distinctUntilChanged()
+                    .map { it.toHashSet() }
+                    .collect { favSet ->
+                        val currentSongs = _libraryState.value.songs
+                        val favSongs = if (favSet.isEmpty() || currentSongs.isEmpty()) {
+                            emptyList()
+                        } else {
+                            currentSongs.filter { favSet.contains(it.id) }
+                        }
+                        val favPreview = favSongs.take(5)
+                        _libraryState.update {
+                            it.copy(
+                                favoriteIds = favSet,
+                                favoriteSongs = favSongs,
+                                homeFavoritesPreview = favPreview
+                            )
+                        }
                     }
-                    val favPreview = favSongs.take(5)
-                    _libraryState.update {
-                        it.copy(
-                            favoriteIds = favSet,
-                            favoriteSongs = favSongs,
-                            homeFavoritesPreview = favPreview
-                        )
-                    }
-                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     private fun observePlaylists() {
         viewModelScope.launch(Dispatchers.Default) {
-            musicDao.getPlaylistsWithTrackCount()
-                .distinctUntilChanged()
-                .map { list -> list.map { it.toPlaylist() } }
-                .collect { playlists ->
-                    _libraryState.update { it.copy(playlists = playlists) }
-                }
+            try {
+                musicDao.getPlaylistsWithTrackCount()
+                    .distinctUntilChanged()
+                    .map { list -> list.map { it.toPlaylist() } }
+                    .collect { playlists ->
+                        _libraryState.update { it.copy(playlists = playlists) }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     private fun observePreferences() {
         viewModelScope.launch(Dispatchers.IO) {
-            userPrefs.themeMode
-                .distinctUntilChanged()
-                .collect { mode ->
-                    _libraryState.update { it.copy(userThemePreference = mode) }
-                }
+            try {
+                userPrefs.themeMode
+                    .distinctUntilChanged()
+                    .collect { mode ->
+                        _libraryState.update { it.copy(userThemePreference = mode) }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
         viewModelScope.launch(Dispatchers.IO) {
-            userPrefs.resumeLast
-                .distinctUntilChanged()
-                .collect { resume ->
-                    _libraryState.update { it.copy(resumeLastPlayback = resume) }
-                }
+            try {
+                userPrefs.resumeLast
+                    .distinctUntilChanged()
+                    .collect { resume ->
+                        _libraryState.update { it.copy(resumeLastPlayback = resume) }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
         viewModelScope.launch(Dispatchers.IO) {
-            userPrefs.pauseOnHeadsetUnplug
-                .distinctUntilChanged()
-                .collect { pauseOnUnplug ->
-                    _libraryState.update { it.copy(pauseOnHeadsetUnplug = pauseOnUnplug) }
-                }
+            try {
+                userPrefs.pauseOnHeadsetUnplug
+                    .distinctUntilChanged()
+                    .collect { pauseOnUnplug ->
+                        _libraryState.update { it.copy(pauseOnHeadsetUnplug = pauseOnUnplug) }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -371,10 +417,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 audioScanRepository.scanAndSyncDeviceAudio()
                 val currentSongs = _libraryState.value.songs
-                if (_libraryState.value.resumeLastPlayback && _libraryState.value.songs.isNotEmpty()) {
+                if (_libraryState.value.resumeLastPlayback && currentSongs.isNotEmpty()) {
                     hasAttemptedInitialRestore.set(true)
                     playerController.restorePlaybackState(currentSongs)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {

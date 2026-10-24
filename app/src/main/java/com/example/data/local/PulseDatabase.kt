@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistSongCrossRef::class,
         PlaybackStateEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class PulseDatabase : RoomDatabase() {
@@ -76,6 +76,20 @@ abstract class PulseDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                try {
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_songs_title` ON `songs` (`title`)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_songs_artist` ON `songs` (`artist`)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_songs_album` ON `songs` (`album`)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_songs_folderName` ON `songs` (`folderName`)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_songs_playlistId_orderIndex` ON `playlist_songs` (`playlistId`, `orderIndex`)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_songs_songId` ON `playlist_songs` (`songId`)")
+                } catch (_: Exception) {
+                }
+            }
+        }
+
         fun getInstance(context: Context): PulseDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -84,7 +98,7 @@ abstract class PulseDatabase : RoomDatabase() {
                     "pulse_music_database.db"
                 )
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration(true)
                     .build()
                 INSTANCE = instance

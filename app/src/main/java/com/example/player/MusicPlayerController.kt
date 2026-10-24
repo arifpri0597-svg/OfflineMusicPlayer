@@ -422,8 +422,10 @@ class MusicPlayerController(
         if (_uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
             return false
         }
-        val activePlayer = controller
-        if (activePlayer != null && activePlayer.isPlaying) {
+        val isPlayerCurrentlyPlaying = kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+            controller?.isPlaying == true
+        }
+        if (isPlayerCurrentlyPlaying) {
             return false
         }
 
@@ -501,11 +503,13 @@ class MusicPlayerController(
             )
         }
 
-        val player = controller
-        if (player != null && !player.isPlaying) {
-            applyRestoredStateToPlayer(player)
-        } else if (player == null && PlaybackService.isServiceRunning) {
-            ensureControllerInitialized()
+        kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+            val player = controller
+            if (player != null && !player.isPlaying) {
+                applyRestoredStateToPlayer(player)
+            } else if (player == null && PlaybackService.isServiceRunning) {
+                ensureControllerInitialized()
+            }
         }
         return true
     }
