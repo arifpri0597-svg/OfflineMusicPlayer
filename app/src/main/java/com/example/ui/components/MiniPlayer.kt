@@ -38,6 +38,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -63,9 +65,15 @@ import com.example.ui.theme.ElectricViolet
 import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPurple
 
+private val MiniPlayerShape = RoundedCornerShape(20.dp)
+private val MiniArtworkShape = RoundedCornerShape(13.dp)
+private val MiniArtworkBrush = Brush.linearGradient(colors = listOf(ElectricViolet, NeonPink))
+private val MiniPlayButtonBrush = Brush.linearGradient(colors = listOf(NeonPink, NeonPurple))
+
 @Composable
 fun MiniPlayer(
     playerState: PlayerUiState,
+    progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>? = null,
     isFavorite: Boolean = false,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
@@ -91,7 +99,7 @@ fun MiniPlayer(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(MiniPlayerShape)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -109,22 +117,16 @@ fun MiniPlayer(
                 }
                 .clickable(onClick = onExpandNowPlaying)
                 .testTag("mini_player_overlay"),
-            shape = RoundedCornerShape(20.dp),
+            shape = MiniPlayerShape,
             tonalElevation = 8.dp,
             shadowElevation = 12.dp,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.35f))
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                LinearProgressIndicator(
-                    progress = { playerState.progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .testTag("mini_player_progress"),
-                    color = NeonPink,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    strokeCap = StrokeCap.Round
+                MiniPlayerProgressBar(
+                    fallbackProgress = playerState.progress,
+                    progressFlow = progressFlow
                 )
 
                 Row(
@@ -162,10 +164,9 @@ fun MiniPlayer(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
-                            Text(
-                                text = " • ${playerState.formattedPosition}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NeonPink
+                            MiniPlayerPositionText(
+                                fallbackFormattedPosition = playerState.formattedPosition,
+                                progressFlow = progressFlow
                             )
                         }
                     }
@@ -186,41 +187,76 @@ fun MiniPlayer(
 }
 
 @Composable
+private fun MiniPlayerProgressBar(
+    fallbackProgress: Float,
+    progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>?
+) {
+    if (progressFlow != null) {
+        val liveState = progressFlow.collectAsState()
+        LinearProgressIndicator(
+            progress = { liveState.value.progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .testTag("mini_player_progress"),
+            color = NeonPink,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            strokeCap = StrokeCap.Round
+        )
+    } else {
+        LinearProgressIndicator(
+            progress = { fallbackProgress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .testTag("mini_player_progress"),
+            color = NeonPink,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            strokeCap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+private fun MiniPlayerPositionText(
+    fallbackFormattedPosition: String,
+    progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>?
+) {
+    val formattedText = if (progressFlow != null) {
+        val liveState = progressFlow.collectAsState()
+        val derivedText by remember {
+            derivedStateOf { liveState.value.formattedPosition }
+        }
+        derivedText
+    } else {
+        fallbackFormattedPosition
+    }
+    Text(
+        text = " • $formattedText",
+        style = MaterialTheme.typography.labelSmall,
+        color = NeonPink
+    )
+}
+
+@Composable
 private fun MiniPlayerArtwork(
     albumArtUriString: String?,
     isBuffering: Boolean
 ) {
-    val context = LocalContext.current
     Box(
         modifier = Modifier
             .size(46.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(ElectricViolet, NeonPink)
-                )
-            ),
+            .clip(MiniArtworkShape)
+            .background(MiniArtworkBrush),
         contentAlignment = Alignment.Center
     ) {
-        if (!albumArtUriString.isNullOrBlank()) {
-            val imageRequest = remember(albumArtUriString) {
-                val key = "thumb_$albumArtUriString"
-                ImageRequest.Builder(context)
-                    .data(albumArtUriString)
-                    .memoryCacheKey(key)
-                    .diskCacheKey(key)
-                    .crossfade(false)
-                    .size(144, 144)
-                    .precision(coil.size.Precision.INEXACT)
-                    .build()
-            }
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = "Mini player artwork",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
+        FastArtworkImage(
+            artworkUri = albumArtUriString,
+            cacheKeyPrefix = "thumb",
+            sizePx = 144,
+            contentDescription = "Mini player artwork",
+            modifier = Modifier.fillMaxSize()
+        ) {
             Icon(
                 imageVector = Icons.Default.MusicNote,
                 contentDescription = null,

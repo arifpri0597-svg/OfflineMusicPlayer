@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -130,6 +131,9 @@ fun HomeScreen(
     albums: List<Album>,
     favoriteSongs: List<Song>,
     favoriteIds: Set<Long> = emptySet(),
+    precomputedAlbumsPreview: List<Album> = emptyList(),
+    precomputedFavoritesPreview: List<Song> = emptyList(),
+    precomputedTracksPreview: List<Song> = emptyList(),
     currentSongId: Long?,
     isPlaying: Boolean,
     onSongClick: (Song, List<Song>) -> Unit,
@@ -177,11 +181,15 @@ fun HomeScreen(
         return
     }
 
-    val albumsPreview = remember(albums) { albums.take(10) }
-    val favoritesPreview = remember(favoriteSongs) { favoriteSongs.take(5) }
-    val filteredAllTracks = remember(songs, searchQuery) {
+    val albumsPreview = remember(precomputedAlbumsPreview, albums) {
+        precomputedAlbumsPreview.ifEmpty { albums.take(10) }
+    }
+    val favoritesPreview = remember(precomputedFavoritesPreview, favoriteSongs) {
+        precomputedFavoritesPreview.ifEmpty { favoriteSongs.take(5) }
+    }
+    val filteredAllTracks = remember(precomputedTracksPreview, songs, searchQuery) {
         if (searchQuery.isBlank()) {
-            songs.take(15)
+            precomputedTracksPreview.ifEmpty { songs.take(15) }
         } else {
             val q = searchQuery.trim()
             songs.filter {
@@ -665,6 +673,8 @@ private fun PureTuneTopHeader(
     }
 }
 
+private val HeroBarFractions = floatArrayOf(0.28f, 0.52f, 0.78f, 0.45f, 0.88f, 0.62f, 0.35f)
+
 @Composable
 private fun PureTuneHeroBanner(
     songCount: Int,
@@ -684,55 +694,60 @@ private fun PureTuneHeroBanner(
             modifier = Modifier
                 .fillMaxSize()
                 .background(HeroBackgroundBrush)
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-
-                drawCircle(
-                    brush = Brush.radialGradient(
+                .drawWithCache {
+                    val width = size.width
+                    val height = size.height
+                    val glowCenter = Offset(width * 0.82f, height * 0.5f)
+                    val glowRadius = height * 0.9f
+                    val glowBrush = Brush.radialGradient(
                         colors = listOf(
                             NeonPink.copy(alpha = 0.36f),
                             NeonPurple.copy(alpha = 0.12f),
                             Color.Transparent
                         ),
-                        center = Offset(width * 0.82f, height * 0.5f),
-                        radius = height * 0.9f
-                    ),
-                    center = Offset(width * 0.82f, height * 0.5f),
-                    radius = height * 0.9f
-                )
-
-                drawCircle(
-                    color = NeonPinkLight.copy(alpha = 0.18f),
-                    radius = height * 0.5f,
-                    center = Offset(width * 0.84f, height * 0.5f),
-                    style = Stroke(width = 2.dp.toPx())
-                )
-                drawCircle(
-                    color = NeonPurple.copy(alpha = 0.24f),
-                    radius = height * 0.34f,
-                    center = Offset(width * 0.84f, height * 0.5f),
-                    style = Stroke(width = 3.dp.toPx())
-                )
-
-                val barHeights = floatArrayOf(0.28f, 0.52f, 0.78f, 0.45f, 0.88f, 0.62f, 0.35f)
-                val barWidth = 5.dp.toPx()
-                val gap = 5.dp.toPx()
-                val startX = width * 0.74f
-                for (i in barHeights.indices) {
-                    val barH = height * 0.52f * barHeights[i]
-                    val x = startX + i * (barWidth + gap)
-                    val y = (height - barH) / 2f
-                    drawRoundRect(
-                        brush = HeroBarBrush,
-                        topLeft = Offset(x, y),
-                        size = Size(barWidth, barH),
-                        cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+                        center = glowCenter,
+                        radius = glowRadius
                     )
-                }
-            }
+                    val ringCenter = Offset(width * 0.84f, height * 0.5f)
+                    val outerRingStroke = Stroke(width = 2.dp.toPx())
+                    val innerRingStroke = Stroke(width = 3.dp.toPx())
+                    val barWidth = 5.dp.toPx()
+                    val gap = 5.dp.toPx()
+                    val startX = width * 0.74f
+                    val barCorner = CornerRadius(barWidth / 2f, barWidth / 2f)
 
+                    onDrawBehind {
+                        drawCircle(
+                            brush = glowBrush,
+                            center = glowCenter,
+                            radius = glowRadius
+                        )
+                        drawCircle(
+                            color = NeonPinkLight.copy(alpha = 0.18f),
+                            radius = height * 0.5f,
+                            center = ringCenter,
+                            style = outerRingStroke
+                        )
+                        drawCircle(
+                            color = NeonPurple.copy(alpha = 0.24f),
+                            radius = height * 0.34f,
+                            center = ringCenter,
+                            style = innerRingStroke
+                        )
+                        for (i in HeroBarFractions.indices) {
+                            val barH = height * 0.52f * HeroBarFractions[i]
+                            val x = startX + i * (barWidth + gap)
+                            val y = (height - barH) / 2f
+                            drawRoundRect(
+                                brush = HeroBarBrush,
+                                topLeft = Offset(x, y),
+                                size = Size(barWidth, barH),
+                                cornerRadius = barCorner
+                            )
+                        }
+                    }
+                }
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -777,11 +792,9 @@ private fun HomeAlbumCard(
     album: Album,
     onClick: () -> Unit
 ) {
-    val context = LocalContext.current
     Card(
         modifier = Modifier
             .width(142.dp)
-            .clip(HomeAlbumCardShape)
             .clickable(onClick = onClick),
         shape = HomeAlbumCardShape,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
@@ -790,38 +803,21 @@ private fun HomeAlbumCard(
         )
     ) {
         Column {
-            Box(
+            com.example.ui.components.FastArtworkImage(
+                artworkUri = album.artworkUri,
+                cacheKeyPrefix = "album",
+                sizePx = 256,
+                contentDescription = album.title,
                 modifier = Modifier
                     .size(142.dp)
-                    .background(HomeAlbumBackdropBrush),
-                contentAlignment = Alignment.Center
+                    .background(HomeAlbumBackdropBrush)
             ) {
-                if (album.artworkUri != null) {
-                    val imageRequest = remember(album.artworkUri) {
-                        val key = "album_${album.artworkUri}"
-                        ImageRequest.Builder(context)
-                            .data(album.artworkUri)
-                            .memoryCacheKey(key)
-                            .diskCacheKey(key)
-                            .crossfade(false)
-                            .size(256, 256)
-                            .precision(coil.size.Precision.INEXACT)
-                            .build()
-                    }
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = album.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Album,
-                        contentDescription = null,
-                        tint = NeonPinkLight,
-                        modifier = Modifier.size(44.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Album,
+                    contentDescription = null,
+                    tint = NeonPinkLight,
+                    modifier = Modifier.size(44.dp)
+                )
             }
             Column(modifier = Modifier.padding(10.dp)) {
                 Text(

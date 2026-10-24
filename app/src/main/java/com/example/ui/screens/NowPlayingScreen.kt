@@ -75,6 +75,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -160,6 +161,7 @@ data class TrackMetadataRow(
 @Composable
 fun NowPlayingScreen(
     playerState: PlayerUiState,
+    progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>? = null,
     isFavorite: Boolean,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -267,11 +269,9 @@ fun NowPlayingScreen(
             )
 
             // 5. Progress Bar (Seek bar, Current time left, Total duration right)
-            NowPlayingProgressSection(
-                progress = playerState.progress,
-                durationMs = playerState.durationMs,
-                formattedPosition = playerState.formattedPosition,
-                formattedDuration = playerState.formattedDuration,
+            NowPlayingLiveProgressSection(
+                fallbackState = playerState,
+                progressFlow = progressFlow,
                 onSeekTo = onSeekTo
             )
 
@@ -1146,32 +1146,17 @@ private fun NowPlayingTopBar(
 private fun NowPlayingHeroArtwork(
     albumArtUriString: String?
 ) {
-    val context = LocalContext.current
-    if (!albumArtUriString.isNullOrBlank()) {
-        val heroImageRequest = remember(albumArtUriString) {
-            val key = "hero_$albumArtUriString"
-            ImageRequest.Builder(context)
-                .data(albumArtUriString)
-                .memoryCacheKey(key)
-                .diskCacheKey(key)
-                .crossfade(false)
-                .size(512, 512)
-                .precision(coil.size.Precision.INEXACT)
-                .build()
-        }
-        AsyncImage(
-            model = heroImageRequest,
-            contentDescription = "Album Artwork",
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("now_playing_artwork"),
-            contentScale = ContentScale.Crop
-        )
-    } else {
+    com.example.ui.components.FastArtworkImage(
+        artworkUri = albumArtUriString,
+        cacheKeyPrefix = "hero",
+        sizePx = 512,
+        contentDescription = "Album Artwork",
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("now_playing_artwork")
+    ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("now_playing_artwork"),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1363,6 +1348,27 @@ private fun NowPlayingActionBar(
             }
         }
     }
+}
+
+@Composable
+private fun NowPlayingLiveProgressSection(
+    fallbackState: PlayerUiState,
+    progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>?,
+    onSeekTo: (Long) -> Unit
+) {
+    val activeState = if (progressFlow != null) {
+        val live by progressFlow.collectAsState()
+        live
+    } else {
+        fallbackState
+    }
+    NowPlayingProgressSection(
+        progress = activeState.progress,
+        durationMs = activeState.durationMs,
+        formattedPosition = activeState.formattedPosition,
+        formattedDuration = activeState.formattedDuration,
+        onSeekTo = onSeekTo
+    )
 }
 
 @Composable
@@ -1671,7 +1677,8 @@ private fun NowPlayingSecondaryControlsRow(
 /**
  * Small subtle audio visualizer / equalizer near the bottom of Now Playing.
  * - Uses pink/magenta bars.
- * - Reacts smoothly to playback at a capped ~24fps refresh rate to save CPU & battery.
+ * - Reads phaseState inside the Canvas draw lambda ONLY so 24fps updates invalidate
+ *   only the draw layer with ZERO Compose recompositions.
  * - Completely disables animation when music is paused (zero background ticks when paused).
  */
 @Composable
@@ -1679,19 +1686,19 @@ private fun NowPlayingWaveformVisualizer(
     isPlaying: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var phase by remember { mutableFloatStateOf(0f) }
+    val phaseState = remember { mutableFloatStateOf(0f) }
 
     // Only run the visualizer loop while music is actively playing
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             while (isActive) {
-                phase = (phase + 0.22f) % (2f * Math.PI.toFloat())
+                phaseState.floatValue = (phaseState.floatValue + 0.22f) % (2f * Math.PI.toFloat())
                 delay(42L) // ~24fps capped refresh rate for low CPU/battery consumption
             }
         }
     }
 
-    val amplitudeFactor by animateFloatAsState(
+    val amplitudeFactorState = animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0.18f,
         animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "waveform_amplitude"
@@ -1700,16 +1707,19 @@ private fun NowPlayingWaveformVisualizer(
     Canvas(
         modifier = modifier.graphicsLayer()
     ) {
+        val currentPhase = phaseState.floatValue
+        val amplitudeFactor = amplitudeFactorState.value
         val barCount = 28
         val totalWidth = size.width
         val maxHeight = size.height
         val slotWidth = totalWidth / barCount
         val barWidth = (slotWidth * 0.48f).coerceAtLeast(2.5.dp.toPx())
+        val cornerRad = CornerRadius(barWidth / 2f, barWidth / 2f)
 
         for (i in 0 until barCount) {
             val normalizedCenterDist = 1f - abs((i - barCount / 2f) / (barCount / 2f))
-            val wave1 = sin(phase + i * 0.48f) * 0.5f + 0.5f
-            val wave2 = sin(phase * 1.4f - i * 0.32f) * 0.5f + 0.5f
+            val wave1 = sin(currentPhase + i * 0.48f) * 0.5f + 0.5f
+            val wave2 = sin(currentPhase * 1.4f - i * 0.32f) * 0.5f + 0.5f
             val combinedWave = (wave1 * 0.65f + wave2 * 0.35f) * normalizedCenterDist
             val fraction = (0.16f + combinedWave * 0.84f * amplitudeFactor).coerceIn(0.14f, 1f)
 
@@ -1721,7 +1731,7 @@ private fun NowPlayingWaveformVisualizer(
                 brush = VisualizerBarBrush,
                 topLeft = Offset(x, y),
                 size = Size(barWidth, barHeight),
-                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+                cornerRadius = cornerRad
             )
         }
     }

@@ -1092,8 +1092,16 @@ class MusicPlayerController(
         val clampedPosition = PlaybackStateRepository.clampPosition(rawPosition, effectiveDuration)
         val isPlayingNow = isPlayingOverride ?: player?.isPlaying ?: state.isPlaying
 
-        val queueIds = if (immutableQueue.isNotEmpty()) {
-            immutableQueue.joinToString(",") { it.id.toString() }
+        val currentQueue = immutableQueue
+        val queueIds = if (currentQueue.isNotEmpty()) {
+            if (currentQueue === cachedQueueForCsv && cachedQueueCsv.isNotEmpty()) {
+                cachedQueueCsv
+            } else {
+                val built = currentQueue.joinToString(",") { it.id.toString() }
+                cachedQueueForCsv = currentQueue
+                cachedQueueCsv = built
+                built
+            }
         } else {
             currentSong.id.toString()
         }
@@ -1146,6 +1154,11 @@ class MusicPlayerController(
         }
         return max(0L, player.currentPosition)
     }
+
+    @Volatile
+    private var cachedQueueForCsv: List<Song> = emptyList()
+    @Volatile
+    private var cachedQueueCsv: String = ""
 
     private val mediaItemCache = java.util.concurrent.ConcurrentHashMap<Long, MediaItem>()
 

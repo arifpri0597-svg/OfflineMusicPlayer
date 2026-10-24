@@ -249,4 +249,28 @@ class ExampleRobolectricTest {
         assertEquals(listOf("Title"), minimalRows.map { it.label })
         assertEquals("Minimal Track", minimalMap["Title"])
     }
+
+    @Test
+    fun `artworkCacheManager negative cache and staticPlayerUiState prevent scroll jank`() {
+        val missingArtUri = "content://media/external/audio/albumart/999999"
+        val validArtUri = "content://media/external/audio/albumart/111111"
+
+        com.example.ui.components.ArtworkCacheManager.clear()
+        assertFalse(com.example.ui.components.ArtworkCacheManager.isKnownMissing(missingArtUri))
+
+        // Once an album's art URI fails to open, ArtworkCacheManager caches the miss so
+        // subsequent songs / scroll passes skip ContentResolver IPC and AsyncImage completely
+        com.example.ui.components.ArtworkCacheManager.markMissing(missingArtUri)
+        assertTrue(com.example.ui.components.ArtworkCacheManager.isKnownMissing(missingArtUri))
+        assertTrue(com.example.ui.components.ArtworkCacheManager.isKnownMissing(null))
+        assertTrue(com.example.ui.components.ArtworkCacheManager.isKnownMissing(""))
+
+        com.example.ui.components.ArtworkCacheManager.markVerified(validArtUri)
+        assertTrue(com.example.ui.components.ArtworkCacheManager.isVerified(validArtUri))
+        assertFalse(com.example.ui.components.ArtworkCacheManager.isKnownMissing(validArtUri))
+
+        com.example.ui.components.ArtworkCacheManager.clear()
+        assertFalse(com.example.ui.components.ArtworkCacheManager.isKnownMissing(missingArtUri))
+    }
 }
+

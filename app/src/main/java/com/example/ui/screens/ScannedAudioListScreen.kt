@@ -74,6 +74,8 @@ import com.example.data.model.Song
 import com.example.data.model.SortOrder
 import com.example.ui.components.EmptyStateView
 
+private val ScannedThumbShape = RoundedCornerShape(10.dp)
+
 /**
  * Jetpack Compose screen that displays the list of scanned audio files
  * queried from the local Room database using a LazyColumn.
@@ -87,6 +89,11 @@ fun ScannedAudioListScreen(
     isPlaying: Boolean,
     totalDurationFormatted: String = "",
     totalStorageFormatted: String = "",
+    displayedSongs: List<Song>? = null,
+    externalSearchQuery: String? = null,
+    externalSortOrder: SortOrder? = null,
+    onSearchQueryChange: ((String) -> Unit)? = null,
+    onSortOrderChange: ((SortOrder) -> Unit)? = null,
     onSongClick: (Song, List<Song>) -> Unit,
     onPlayAll: (List<Song>) -> Unit,
     onShuffleAll: (List<Song>) -> Unit,
@@ -97,28 +104,41 @@ fun ScannedAudioListScreen(
     onRescanStorage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedSortOrder by remember { mutableStateOf(SortOrder.TITLE_ASC) }
+    var localSearchQuery by remember { mutableStateOf("") }
+    var localSortOrder by remember { mutableStateOf(SortOrder.TITLE_ASC) }
 
-    val filteredAndSortedSongs by remember(songs, searchQuery, selectedSortOrder) {
+    val searchQuery = externalSearchQuery ?: localSearchQuery
+    val selectedSortOrder = externalSortOrder ?: localSortOrder
+    val updateSearchQuery: (String) -> Unit = remember(onSearchQueryChange) {
+        onSearchQueryChange ?: { localSearchQuery = it }
+    }
+    val updateSortOrder: (SortOrder) -> Unit = remember(onSortOrderChange) {
+        onSortOrderChange ?: { localSortOrder = it }
+    }
+
+    val filteredAndSortedSongs by remember(displayedSongs, songs, searchQuery, selectedSortOrder) {
         derivedStateOf {
-            val query = searchQuery.trim()
-            val filtered = if (query.isEmpty()) {
-                songs
+            if (displayedSongs != null) {
+                displayedSongs
             } else {
-                songs.filter { song ->
-                    song.title.contains(query, ignoreCase = true) ||
-                    song.artist.contains(query, ignoreCase = true) ||
-                    song.album.contains(query, ignoreCase = true) ||
-                    song.folderName.contains(query, ignoreCase = true)
+                val query = searchQuery.trim()
+                val filtered = if (query.isEmpty()) {
+                    songs
+                } else {
+                    songs.filter { song ->
+                        song.title.contains(query, ignoreCase = true) ||
+                            song.artist.contains(query, ignoreCase = true) ||
+                            song.album.contains(query, ignoreCase = true) ||
+                            song.folderName.contains(query, ignoreCase = true)
+                    }
                 }
-            }
 
-            when (selectedSortOrder) {
-                SortOrder.TITLE_ASC -> filtered
-                SortOrder.ARTIST_ASC -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
-                SortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
-                SortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAdded }
+                when (selectedSortOrder) {
+                    SortOrder.TITLE_ASC -> filtered
+                    SortOrder.ARTIST_ASC -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
+                    SortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
+                    SortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAdded }
+                }
             }
         }
     }
@@ -219,7 +239,7 @@ fun ScannedAudioListScreen(
             // Search Bar
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = updateSearchQuery,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -228,7 +248,7 @@ fun ScannedAudioListScreen(
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
+                        IconButton(onClick = { updateSearchQuery("") }) {
                             Icon(Icons.Default.Clear, contentDescription = "Clear")
                         }
                     }
@@ -250,22 +270,22 @@ fun ScannedAudioListScreen(
             ) {
                 FilterChip(
                     selected = selectedSortOrder == SortOrder.TITLE_ASC,
-                    onClick = { selectedSortOrder = SortOrder.TITLE_ASC },
+                    onClick = { updateSortOrder(SortOrder.TITLE_ASC) },
                     label = { Text("Title A-Z") }
                 )
                 FilterChip(
                     selected = selectedSortOrder == SortOrder.ARTIST_ASC,
-                    onClick = { selectedSortOrder = SortOrder.ARTIST_ASC },
+                    onClick = { updateSortOrder(SortOrder.ARTIST_ASC) },
                     label = { Text("Artist") }
                 )
                 FilterChip(
                     selected = selectedSortOrder == SortOrder.DURATION_DESC,
-                    onClick = { selectedSortOrder = SortOrder.DURATION_DESC },
+                    onClick = { updateSortOrder(SortOrder.DURATION_DESC) },
                     label = { Text("Duration") }
                 )
                 FilterChip(
                     selected = selectedSortOrder == SortOrder.DATE_ADDED_DESC,
-                    onClick = { selectedSortOrder = SortOrder.DATE_ADDED_DESC },
+                    onClick = { updateSortOrder(SortOrder.DATE_ADDED_DESC) },
                     label = { Text("Recent") }
                 )
             }
@@ -278,7 +298,7 @@ fun ScannedAudioListScreen(
                         title = "No Matches Found",
                         description = "No audio files matching \"$searchQuery\" in the database.",
                         actionButtonText = "Clear Filter",
-                        onActionClick = { searchQuery = "" },
+                        onActionClick = { updateSearchQuery("") },
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
@@ -371,60 +391,39 @@ private fun ScannedAudioItemRow(
     modifier: Modifier = Modifier
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val context = LocalContext.current
+    val rowBgColor = if (isPlaying) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+    } else {
+        Color.Transparent
+    }
 
-    Surface(
+    Row(
         modifier = modifier
             .fillMaxWidth()
+            .background(rowBgColor)
             .clickable(onClick = onSongClick)
-            .testTag("scanned_audio_row_${song.id}"),
-        color = if (isPlaying) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        } else {
-            Color.Transparent
-        }
+            .testTag("scanned_audio_row_${song.id}")
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        // Artwork / Thumbnail with negative URI cache
+        com.example.ui.components.FastArtworkImage(
+            artworkUri = song.albumArtUri,
+            cacheKeyPrefix = "thumb",
+            sizePx = 144,
+            contentDescription = "Cover for ${song.title}",
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(50.dp)
+                .clip(ScannedThumbShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            // Artwork / Thumbnail with Coil
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                if (song.albumArtUri != null) {
-                    val imageRequest = remember(song.albumArtUri) {
-                        val key = "thumb_${song.albumArtUri}"
-                        ImageRequest.Builder(context)
-                            .data(song.albumArtUri)
-                            .memoryCacheKey(key)
-                            .diskCacheKey(key)
-                            .crossfade(false)
-                            .size(144, 144)
-                            .precision(coil.size.Precision.INEXACT)
-                            .build()
-                    }
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = "Cover for ${song.title}",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Audiotrack,
-                        contentDescription = null,
-                        tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
+            Icon(
+                imageVector = Icons.Default.Audiotrack,
+                contentDescription = null,
+                tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(26.dp)
+            )
+        }
 
             Spacer(modifier = Modifier.width(14.dp))
 
@@ -521,5 +520,4 @@ private fun ScannedAudioItemRow(
                 }
             }
         }
-    }
 }

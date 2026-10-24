@@ -110,39 +110,22 @@ fun AlbumsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
+                        com.example.ui.components.FastArtworkImage(
+                            artworkUri = selectedAlbum.artworkUri,
+                            cacheKeyPrefix = "album",
+                            sizePx = 256,
+                            contentDescription = selectedAlbum.title,
                             modifier = Modifier
                                 .size(110.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                         ) {
-                            if (selectedAlbum.artworkUri != null) {
-                                val imageRequest = remember(selectedAlbum.artworkUri) {
-                                    val key = "album_${selectedAlbum.artworkUri}"
-                                    ImageRequest.Builder(context)
-                                        .data(selectedAlbum.artworkUri)
-                                        .memoryCacheKey(key)
-                                        .diskCacheKey(key)
-                                        .crossfade(false)
-                                        .size(256, 256)
-                                        .precision(coil.size.Precision.INEXACT)
-                                        .build()
-                                }
-                                AsyncImage(
-                                    model = imageRequest,
-                                    contentDescription = selectedAlbum.title,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Album,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(52.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Album,
+                                contentDescription = null,
+                                modifier = Modifier.size(52.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
 
                         Spacer(modifier = Modifier.width(16.dp))

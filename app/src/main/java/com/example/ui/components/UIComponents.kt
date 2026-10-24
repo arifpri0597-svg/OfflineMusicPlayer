@@ -113,7 +113,6 @@ fun SongItemRow(
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val context = LocalContext.current
 
     val cardBgColor = if (isPlaying) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
@@ -127,168 +126,150 @@ fun SongItemRow(
         MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
     }
 
-    Surface(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(SongRowShape)
+            .background(color = cardBgColor, shape = SongRowShape)
+            .border(width = 1.dp, color = borderColor, shape = SongRowShape)
             .clickable(onClick = onSongClick)
-            .testTag("song_item_${song.id}"),
-        shape = SongRowShape,
-        color = cardBgColor,
-        border = BorderStroke(1.dp, borderColor)
+            .testTag("song_item_${song.id}")
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        // Album art thumbnail with neon gradient backdrop & negative URI cache
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(52.dp)
+                .clip(SongThumbShape)
+                .background(SongThumbBrush),
+            contentAlignment = Alignment.Center
         ) {
-            // Album art thumbnail with neon gradient backdrop
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(SongThumbShape)
-                    .background(SongThumbBrush),
-                contentAlignment = Alignment.Center
-            ) {
-                if (song.albumArtUri != null) {
-                    val imageRequest = remember(song.albumArtUri) {
-                        val key = "thumb_${song.albumArtUri}"
-                        ImageRequest.Builder(context)
-                            .data(song.albumArtUri)
-                            .memoryCacheKey(key)
-                            .diskCacheKey(key)
-                            .crossfade(false)
-                            .size(144, 144)
-                            .precision(coil.size.Precision.INEXACT)
-                            .build()
-                    }
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = "Album art",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = if (isPlaying) NeonPink else NeonPurple,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                if (isPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(PlayingOverlayColor),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Equalizer,
-                            contentDescription = "Playing",
-                            tint = NeonPink,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            // Title & Artist
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = song.artist,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Text(
-                        text = " • ${song.formattedDuration}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isPlaying) NeonPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                    )
-                }
-            }
-
-            // Favorite Button
-            val favColor = if (isFavorite) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant
-            IconButton(
-                onClick = onToggleFavorite,
-                modifier = Modifier
-                    .size(40.dp)
-                    .testTag("fav_btn_${song.id}")
+            FastArtworkImage(
+                artworkUri = song.albumArtUri,
+                cacheKeyPrefix = "thumb",
+                sizePx = 144,
+                contentDescription = "Album art",
+                modifier = Modifier.fillMaxSize()
             ) {
                 Icon(
-                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = favColor,
+                    imageVector = Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = if (isPlaying) NeonPink else NeonPurple,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            if (isPlaying) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(PlayingOverlayColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Equalizer,
+                        contentDescription = "Playing",
+                        tint = NeonPink,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        // Title & Artist
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
+                color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Text(
+                    text = " • ${song.formattedDuration}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isPlaying) NeonPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
+            }
+        }
+
+        // Favorite Button
+        val favColor = if (isFavorite) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant
+        IconButton(
+            onClick = onToggleFavorite,
+            modifier = Modifier
+                .size(40.dp)
+                .testTag("fav_btn_${song.id}")
+        ) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                contentDescription = "Favorite",
+                tint = favColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // More Options Menu (only compose DropdownMenu popup when expanded)
+        Box {
+            IconButton(
+                onClick = { menuExpanded = true },
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("more_btn_${song.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Song options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }
-
-            // More Options Menu (only compose DropdownMenu popup when expanded)
-            Box {
-                IconButton(
-                    onClick = { menuExpanded = true },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .testTag("more_btn_${song.id}")
+            if (menuExpanded) {
+                DropdownMenu(
+                    expanded = true,
+                    onDismissRequest = { menuExpanded = false }
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Song options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                    DropdownMenuItem(
+                        text = { Text("Play Next") },
+                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonPink) },
+                        onClick = {
+                            menuExpanded = false
+                            onPlayNext()
+                        }
                     )
-                }
-                if (menuExpanded) {
-                    DropdownMenu(
-                        expanded = true,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Play Next") },
-                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonPink) },
-                            onClick = {
-                                menuExpanded = false
-                                onPlayNext()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to Queue") },
-                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPurple) },
-                            onClick = {
-                                menuExpanded = false
-                                onAddToQueue()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to Playlist") },
-                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPink) },
-                            onClick = {
-                                menuExpanded = false
-                                onAddToPlaylist()
-                            }
-                        )
-                    }
+                    DropdownMenuItem(
+                        text = { Text("Add to Queue") },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPurple) },
+                        onClick = {
+                            menuExpanded = false
+                            onAddToQueue()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to Playlist") },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPink) },
+                        onClick = {
+                            menuExpanded = false
+                            onAddToPlaylist()
+                        }
+                    )
                 }
             }
         }
@@ -301,11 +282,9 @@ fun AlbumCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clip(AlbumCardShape)
             .clickable(onClick = onClick)
             .testTag("album_card_${album.id}"),
         shape = AlbumCardShape,
@@ -315,39 +294,22 @@ fun AlbumCard(
         )
     ) {
         Column {
-            Box(
+            FastArtworkImage(
+                artworkUri = album.artworkUri,
+                cacheKeyPrefix = "album",
+                sizePx = 256,
+                contentDescription = album.title,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .background(AlbumPlaceholderBrush),
-                contentAlignment = Alignment.Center
+                    .background(AlbumPlaceholderBrush)
             ) {
-                if (album.artworkUri != null) {
-                    val imageRequest = remember(album.artworkUri) {
-                        val key = "album_${album.artworkUri}"
-                        ImageRequest.Builder(context)
-                            .data(album.artworkUri)
-                            .memoryCacheKey(key)
-                            .diskCacheKey(key)
-                            .crossfade(false)
-                            .size(256, 256)
-                            .precision(coil.size.Precision.INEXACT)
-                            .build()
-                    }
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = album.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Album,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = NeonPink
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Album,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = NeonPink
+                )
             }
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
@@ -376,51 +338,47 @@ fun ArtistItemRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(SongRowShape)
+            .background(color = bgColor, shape = SongRowShape)
+            .border(width = 1.dp, color = borderColor, shape = SongRowShape)
             .clickable(onClick = onClick)
-            .testTag("artist_item_${artist.name}"),
-        shape = SongRowShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            .testTag("artist_item_${artist.name}")
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(ArtistAvatarBrush),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(CircleShape)
-                    .background(ArtistAvatarBrush),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = artist.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "${artist.songCount} songs • ${artist.albumCount} albums",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(26.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = artist.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "${artist.songCount} songs • ${artist.albumCount} albums",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -431,51 +389,47 @@ fun FolderItemRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(SongRowShape)
+            .background(color = bgColor, shape = SongRowShape)
+            .border(width = 1.dp, color = borderColor, shape = SongRowShape)
             .clickable(onClick = onClick)
-            .testTag("folder_item_${folder.name}"),
-        shape = SongRowShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            .testTag("folder_item_${folder.name}")
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(48.dp)
+                .clip(SongThumbShape)
+                .background(FolderIconBrush),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(SongThumbShape)
-                    .background(FolderIconBrush),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Folder,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = folder.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "${folder.songCount} audio files",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = folder.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "${folder.songCount} audio files",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

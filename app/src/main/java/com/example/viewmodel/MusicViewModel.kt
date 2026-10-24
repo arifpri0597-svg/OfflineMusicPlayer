@@ -54,6 +54,7 @@ data class RootPlaybackSummary(
 data class LibraryUiState(
     val isLoading: Boolean = false,
     val songs: List<Song> = emptyList(),
+    val displayedSongs: List<Song> = emptyList(),
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val folders: List<Folder> = emptyList(),
@@ -63,6 +64,9 @@ data class LibraryUiState(
     val songForAddToPlaylist: Song? = null,
     val favoriteIds: Set<Long> = emptySet(),
     val favoriteSongs: List<Song> = emptyList(),
+    val homeAlbumsPreview: List<Album> = emptyList(),
+    val homeFavoritesPreview: List<Song> = emptyList(),
+    val homeTracksPreview: List<Song> = emptyList(),
     val songsByAlbum: Map<String, List<Song>> = emptyMap(),
     val songsByArtist: Map<String, List<Song>> = emptyMap(),
     val songsByFolder: Map<String, List<Song>> = emptyMap(),
@@ -99,6 +103,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     val playerUiState: StateFlow<PlayerUiState> = playerController.uiState
 
+    val staticPlayerUiState = playerUiState
+        .distinctUntilChanged { old, new ->
+            old.currentSong == new.currentSong &&
+                old.currentIndex == new.currentIndex &&
+                old.isPlaying == new.isPlaying &&
+                old.isBuffering == new.isBuffering &&
+                old.durationMs == new.durationMs &&
+                old.isShuffleEnabled == new.isShuffleEnabled &&
+                old.repeatMode == new.repeatMode &&
+                old.playbackSpeed == new.playbackSpeed &&
+                old.queue === new.queue &&
+                old.errorMessage == new.errorMessage
+        }
+
     val rootPlaybackSummary = playerUiState
         .map { state ->
             RootPlaybackSummary(
@@ -115,6 +133,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var playlistSongsJob: Job? = null
     private var scanJob: Job? = null
+    private var filterSortJob: Job? = null
     private val hasStartedDatabaseObservers = java.util.concurrent.atomic.AtomicBoolean(false)
     private val hasPerformedInitialScan = java.util.concurrent.atomic.AtomicBoolean(false)
     private val hasAttemptedInitialRestore = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -137,14 +156,42 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         observePlaylists()
     }
 
+    private fun computeDisplayedSongs(
+        songs: List<Song>,
+        rawQuery: String,
+        sortOrder: SortOrder
+    ): List<Song> {
+        val query = rawQuery.trim()
+        val filtered = if (query.isEmpty()) {
+            songs
+        } else {
+            songs.filter { song ->
+                song.title.contains(query, ignoreCase = true) ||
+                    song.artist.contains(query, ignoreCase = true) ||
+                    song.album.contains(query, ignoreCase = true) ||
+                    song.folderName.contains(query, ignoreCase = true)
+            }
+        }
+        return when (sortOrder) {
+            SortOrder.TITLE_ASC -> filtered
+            SortOrder.ARTIST_ASC -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
+            SortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
+            SortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAdded }
+        }
+    }
+
     private fun observeSongsFromDatabase() {
         viewModelScope.launch(Dispatchers.Default) {
             audioScanRepository.getBaseSongsFlow().collect { songsList ->
                 val currentSongIds = songsList.map { it.id }
-                val favIds = _libraryState.value.favoriteIds
+                val currentState = _libraryState.value
+                val favIds = currentState.favoriteIds
                 val favSongs = if (favIds.isEmpty()) emptyList() else songsList.filter { favIds.contains(it.id) }
+                val displayed = computeDisplayedSongs(songsList, currentState.searchQuery, currentState.sortOrder)
+                val homeTracks = songsList.take(15)
+                val homeFavs = favSongs.take(5)
 
-                if (currentSongIds != lastGroupedSongIds || (songsList.isEmpty() && _libraryState.value.albums.isNotEmpty())) {
+                if (currentSongIds != lastGroupedSongIds || (songsList.isEmpty() && currentState.albums.isNotEmpty())) {
                     lastGroupedSongIds = currentSongIds
                     coroutineScope {
                         val albumsDeferred = async { audioScanRepository.getAlbums(songsList) }
@@ -183,6 +230,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         val byArtist = byArtistDeferred.await()
                         val byFolder = byFolderDeferred.await()
                         val (durStr, sizeStr) = statsDeferred.await()
+                        val homeAlbums = albums.take(10)
 
                         _libraryState.update { state ->
                             val latestFavIds = state.favoriteIds
@@ -193,12 +241,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             } else {
                                 songsList.filter { latestFavIds.contains(it.id) }
                             }
+                            val latestDisplayed = if (state.searchQuery == currentState.searchQuery &&
+                                state.sortOrder == currentState.sortOrder
+                            ) {
+                                displayed
+                            } else {
+                                computeDisplayedSongs(songsList, state.searchQuery, state.sortOrder)
+                            }
                             state.copy(
                                 songs = songsList,
+                                displayedSongs = latestDisplayed,
                                 albums = albums,
                                 artists = artists,
                                 folders = folders,
                                 favoriteSongs = latestFavSongs,
+                                homeAlbumsPreview = homeAlbums,
+                                homeFavoritesPreview = latestFavSongs.take(5),
+                                homeTracksPreview = homeTracks,
                                 songsByAlbum = byAlbum,
                                 songsByArtist = byArtist,
                                 songsByFolder = byFolder,
@@ -211,7 +270,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     _libraryState.update { state ->
                         state.copy(
                             songs = songsList,
-                            favoriteSongs = favSongs
+                            displayedSongs = displayed,
+                            favoriteSongs = favSongs,
+                            homeFavoritesPreview = homeFavs,
+                            homeTracksPreview = homeTracks
                         )
                     }
                 }
@@ -237,10 +299,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         currentSongs.filter { favSet.contains(it.id) }
                     }
+                    val favPreview = favSongs.take(5)
                     _libraryState.update {
                         it.copy(
                             favoriteIds = favSet,
-                            favoriteSongs = favSongs
+                            favoriteSongs = favSongs,
+                            homeFavoritesPreview = favPreview
                         )
                     }
                 }
@@ -301,6 +365,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshLibrary() {
         if (!_libraryState.value.hasPermission) return
         if (!isScanInFlight.compareAndSet(false, true)) return
+        com.example.ui.components.ArtworkCacheManager.clear()
         scanJob = viewModelScope.launch(Dispatchers.IO) {
             _libraryState.update { it.copy(isLoading = true) }
             try {
@@ -441,10 +506,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSearchQuery(query: String) {
         _libraryState.update { it.copy(searchQuery = query) }
+        recomputeDisplayedSongsAsync()
     }
 
     fun setSortOrder(order: SortOrder) {
         _libraryState.update { it.copy(sortOrder = order) }
+        recomputeDisplayedSongsAsync()
+    }
+
+    private fun recomputeDisplayedSongsAsync() {
+        filterSortJob?.cancel()
+        val snapshot = _libraryState.value
+        val songs = snapshot.songs
+        val query = snapshot.searchQuery
+        val order = snapshot.sortOrder
+        filterSortJob = viewModelScope.launch(Dispatchers.Default) {
+            val result = computeDisplayedSongs(songs, query, order)
+            _libraryState.update { current ->
+                if (current.songs === songs && current.searchQuery == query && current.sortOrder == order) {
+                    current.copy(displayedSongs = result)
+                } else {
+                    current
+                }
+            }
+        }
     }
 
     fun toggleFavorite(songId: Long) {

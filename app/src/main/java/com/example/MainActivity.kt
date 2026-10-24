@@ -407,6 +407,8 @@ fun PulseMusicAppRoot(
     val onNavigateToFavorites = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.FAVORITES) } }
     val onNavigateToArtists = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.ARTISTS) } }
     val onNavigateToSettings = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.SETTINGS) } }
+    val onSearchQueryChange = remember(viewModel) { { query: String -> viewModel.setSearchQuery(query) } }
+    val onSortOrderChange = remember(viewModel) { { order: com.example.data.model.SortOrder -> viewModel.setSortOrder(order) } }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -419,7 +421,7 @@ fun PulseMusicAppRoot(
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.navigationBars)
                 ) {
-                    // Isolated MiniPlayer section so progress ticks only recompose MiniPlayer
+                    // Isolated MiniPlayer section so progress ticks only update progress bar & 1Hz label
                     MiniPlayerSection(
                         viewModel = viewModel,
                         favoriteIds = libraryState.favoriteIds
@@ -490,6 +492,9 @@ fun PulseMusicAppRoot(
                                 albums = libraryState.albums,
                                 favoriteSongs = favoriteSongs,
                                 favoriteIds = libraryState.favoriteIds,
+                                precomputedAlbumsPreview = libraryState.homeAlbumsPreview,
+                                precomputedFavoritesPreview = libraryState.homeFavoritesPreview,
+                                precomputedTracksPreview = libraryState.homeTracksPreview,
                                 currentSongId = currentSongId,
                                 isPlaying = isPlaying,
                                 onSongClick = onSongClick,
@@ -520,6 +525,11 @@ fun PulseMusicAppRoot(
                                 isPlaying = isPlaying,
                                 totalDurationFormatted = libraryState.totalDurationFormatted,
                                 totalStorageFormatted = libraryState.totalStorageFormatted,
+                                displayedSongs = libraryState.displayedSongs,
+                                externalSearchQuery = libraryState.searchQuery,
+                                externalSortOrder = libraryState.sortOrder,
+                                onSearchQueryChange = onSearchQueryChange,
+                                onSortOrderChange = onSortOrderChange,
                                 onSongClick = onSongClick,
                                 onPlayAll = onPlayAllList,
                                 onShuffleAll = onShuffleAllList,
@@ -675,8 +685,9 @@ private fun MiniPlayerSection(
     viewModel: MusicViewModel,
     favoriteIds: Set<Long>
 ) {
-    val playerState by viewModel.playerUiState.collectAsState()
-    val currentSongId = playerState.currentSong?.id
+    val initialState = remember(viewModel) { viewModel.playerUiState.value }
+    val staticPlayerState by viewModel.staticPlayerUiState.collectAsState(initial = initialState)
+    val currentSongId = staticPlayerState.currentSong?.id
     val isCurrentFavorite = currentSongId != null && favoriteIds.contains(currentSongId)
 
     val onTogglePlayPause = remember(viewModel) { { viewModel.playerController.togglePlayPause() } }
@@ -690,7 +701,8 @@ private fun MiniPlayerSection(
     val onExpandNowPlaying = remember(viewModel) { { viewModel.setNowPlayingExpanded(true) } }
 
     MiniPlayer(
-        playerState = playerState,
+        playerState = staticPlayerState,
+        progressFlow = viewModel.playerUiState,
         isFavorite = isCurrentFavorite,
         onTogglePlayPause = onTogglePlayPause,
         onSkipNext = onSkipNext,
@@ -732,14 +744,16 @@ private fun NowPlayingOverlaySection(
             targetOffsetY = { it }
         )
     ) {
-        val playerState by viewModel.playerUiState.collectAsState()
-        val currentSongId = playerState.currentSong?.id
+        val initialState = remember(viewModel) { viewModel.playerUiState.value }
+        val staticPlayerState by viewModel.staticPlayerUiState.collectAsState(initial = initialState)
+        val currentSongId = staticPlayerState.currentSong?.id
         val isCurrentFav = currentSongId != null && favoriteIds.contains(currentSongId)
         val onToggleFavorite = remember(viewModel, currentSongId) {
             { currentSongId?.let { viewModel.toggleFavorite(it) } ?: Unit }
         }
         NowPlayingScreen(
-            playerState = playerState,
+            playerState = staticPlayerState,
+            progressFlow = viewModel.playerUiState,
             isFavorite = isCurrentFav,
             onCollapse = onCollapse,
             onTogglePlayPause = onTogglePlayPause,
