@@ -302,6 +302,10 @@ class ExampleRobolectricTest {
                     selectionArgs: Array<out String>?,
                     sortOrder: String?
                 ): android.database.Cursor {
+                    // Simulate Android 13 MediaProvider strict SQLiteQueryBuilder.enforceStrictOrderBy
+                    if (sortOrder != null && sortOrder.contains("COLLATE", ignoreCase = true)) {
+                        throw IllegalArgumentException("Invalid token COLLATE in sortOrder: $sortOrder")
+                    }
                     val cursor = android.database.MatrixCursor(mediaColumns, songCount.coerceAtLeast(1))
                     for (i in 1..songCount) {
                         cursor.addRow(
@@ -331,11 +335,12 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    @Config(sdk = [33])
     fun `reproduce fresh install permission grant to HomeScreen and all tabs rendering`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
 
-        // TEST A & TEST D & TEST F & TEST G:
+        // TEST A & TEST D & TEST F & TEST G on Android 13 (API 33):
         // Fresh install -> Permission denied shows PermissionView -> Grant permissions ->
         // Scans 250 songs (with & without artwork and null fields) -> Home screen & all tabs load
         shadowApp.denyPermissions(
@@ -353,15 +358,25 @@ class ExampleRobolectricTest {
             // TEST D: Permission denied -> App shows safe permission required state
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("permission_view")).assertExists()
 
-            // TEST A: Grant permission and click the Grant Permission button
-            shadowApp.grantPermissions(
-                android.Manifest.permission.READ_MEDIA_AUDIO,
-                android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            )
-
+            // TEST A: Click Grant Permission button while permission is still denied (launches system dialog),
+            // then simulate user tapping "Allow" in the Android 13 system permission dialog
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("grant_permission_btn"))
                 .performClick()
+            composeTestRule.waitForIdle()
+
+            shadowApp.grantPermissions(android.Manifest.permission.READ_MEDIA_AUDIO)
+            scenario.onActivity { activity ->
+                val shadowActivity = org.robolectric.Shadows.shadowOf(activity)
+                val lastReq = shadowActivity.lastRequestedPermission
+                val reqCode = lastReq?.requestCode ?: 1
+                val perms = lastReq?.requestedPermissions
+                    ?: arrayOf(android.Manifest.permission.READ_MEDIA_AUDIO)
+                activity.onRequestPermissionsResult(
+                    reqCode,
+                    perms,
+                    IntArray(perms.size) { android.content.pm.PackageManager.PERMISSION_GRANTED }
+                )
+            }
             composeTestRule.waitForIdle()
 
             val deadline = System.currentTimeMillis() + 5_000L
@@ -402,6 +417,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    @Config(sdk = [33])
     fun `clear app data and grant permission on empty device shows HomeScreen safely`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
@@ -421,11 +437,7 @@ class ExampleRobolectricTest {
             composeTestRule.waitForIdle()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("permission_view")).assertExists()
 
-            shadowApp.grantPermissions(
-                android.Manifest.permission.READ_MEDIA_AUDIO,
-                android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            )
+            shadowApp.grantPermissions(android.Manifest.permission.READ_MEDIA_AUDIO)
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("grant_permission_btn"))
                 .performClick()
             composeTestRule.waitForIdle()
@@ -452,6 +464,49 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    @Config(sdk = [33])
+    fun `permission denied callback keeps PermissionView visible without crashing`() {
+        val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
+        val shadowApp = org.robolectric.Shadows.shadowOf(app)
+
+        shadowApp.denyPermissions(
+            android.Manifest.permission.READ_MEDIA_AUDIO,
+            android.Manifest.permission.READ_EXTERNAL_STORAGE,
+            android.Manifest.permission.POST_NOTIFICATIONS
+        )
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            app.database.clearAllTables()
+        }
+        registerTestMediaStoreProvider(50)
+
+        androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("permission_view")).assertExists()
+
+            // Click Grant Permission -> user denies in system dialog
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("grant_permission_btn"))
+                .performClick()
+            composeTestRule.waitForIdle()
+
+            scenario.onActivity { activity ->
+                val shadowActivity = org.robolectric.Shadows.shadowOf(activity)
+                val lastReq = shadowActivity.lastRequestedPermission
+                val reqCode = lastReq?.requestCode ?: 1
+                val perms = lastReq?.requestedPermissions
+                    ?: arrayOf(android.Manifest.permission.READ_MEDIA_AUDIO)
+                activity.onRequestPermissionsResult(
+                    reqCode,
+                    perms,
+                    IntArray(perms.size) { android.content.pm.PackageManager.PERMISSION_DENIED }
+                )
+            }
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("permission_view")).assertExists()
+        }
+    }
+
+    @Test
+    @Config(sdk = [33])
     fun `permission already granted on app launch loads library directly to HomeScreen`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)

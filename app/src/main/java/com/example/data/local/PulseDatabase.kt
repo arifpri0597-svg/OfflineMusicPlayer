@@ -92,7 +92,7 @@ abstract class PulseDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): PulseDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     PulseDatabase::class.java,
                     "pulse_music_database.db"
@@ -101,8 +101,7 @@ abstract class PulseDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration(true)
                     .build()
-                INSTANCE = instance
-                instance
+                    .also { INSTANCE = it }
             }
         }
     }

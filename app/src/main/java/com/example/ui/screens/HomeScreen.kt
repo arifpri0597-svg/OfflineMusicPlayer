@@ -157,6 +157,35 @@ fun HomeScreen(
     var showSearchBar by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
+    val albumsPreview = remember(precomputedAlbumsPreview, albums) {
+        precomputedAlbumsPreview.ifEmpty { albums.take(10) }
+            .distinctBy { "${it.id}_${it.title}" }
+    }
+    val favoritesPreview = remember(precomputedFavoritesPreview, favoriteSongs) {
+        precomputedFavoritesPreview.ifEmpty { favoriteSongs.take(5) }
+            .distinctBy { it.id }
+    }
+    val filteredAllTracks = remember(precomputedTracksPreview, songs, searchQuery) {
+        val raw = if (searchQuery.isBlank()) {
+            precomputedTracksPreview.ifEmpty { songs.take(15) }
+        } else {
+            val q = searchQuery.trim()
+            songs.filter {
+                it.title.contains(q, ignoreCase = true) ||
+                    it.artist.contains(q, ignoreCase = true) ||
+                    it.album.contains(q, ignoreCase = true)
+            }
+        }
+        raw.distinctBy { it.id }
+    }
+    val favoriteIdSet = remember(favoriteIds, favoriteSongs) {
+        if (favoriteIds.isNotEmpty() || favoriteSongs.isEmpty()) {
+            favoriteIds
+        } else {
+            favoriteSongs.mapTo(HashSet(favoriteSongs.size)) { it.id }
+        }
+    }
+
     if (songs.isEmpty()) {
         Column(
             modifier = modifier
@@ -179,42 +208,14 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        return
-    }
-
-    val albumsPreview = remember(precomputedAlbumsPreview, albums) {
-        precomputedAlbumsPreview.ifEmpty { albums.take(10) }
-    }
-    val favoritesPreview = remember(precomputedFavoritesPreview, favoriteSongs) {
-        precomputedFavoritesPreview.ifEmpty { favoriteSongs.take(5) }
-    }
-    val filteredAllTracks = remember(precomputedTracksPreview, songs, searchQuery) {
-        if (searchQuery.isBlank()) {
-            precomputedTracksPreview.ifEmpty { songs.take(15) }
-        } else {
-            val q = searchQuery.trim()
-            songs.filter {
-                it.title.contains(q, ignoreCase = true) ||
-                    it.artist.contains(q, ignoreCase = true) ||
-                    it.album.contains(q, ignoreCase = true)
-            }
-        }
-    }
-    val favoriteIdSet = remember(favoriteIds, favoriteSongs) {
-        if (favoriteIds.isNotEmpty() || favoriteSongs.isEmpty()) {
-            favoriteIds
-        } else {
-            favoriteSongs.mapTo(HashSet(favoriteSongs.size)) { it.id }
-        }
-    }
-
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .background(HomeBackgroundBrush)
-            .testTag("home_screen"),
-        contentPadding = PaddingValues(bottom = 104.dp)
-    ) {
+    } else {
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .background(HomeBackgroundBrush)
+                .testTag("home_screen"),
+            contentPadding = PaddingValues(bottom = 104.dp)
+        ) {
         // 1. App Title Header + Hero Banner + Shuffle All / Play All + Quick Access Cards
         item(key = "home_header", contentType = "header") {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -523,6 +524,7 @@ fun HomeScreen(
                 onAddToQueue = { onAddToQueue(song) },
                 onAddToPlaylist = { onAddToPlaylist(song) }
             )
+        }
         }
     }
 }

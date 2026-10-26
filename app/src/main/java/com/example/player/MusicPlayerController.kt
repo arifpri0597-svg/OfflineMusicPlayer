@@ -44,8 +44,15 @@ class MusicPlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
     initialPlayer: Player? = null,
-    private val playbackStateRepository: PlaybackStateRepository? = null
+    playbackStateRepository: PlaybackStateRepository? = null,
+    private val playbackStateRepositoryProvider: (() -> PlaybackStateRepository?)? = null
 ) {
+    private val resolvedPlaybackStateRepository: PlaybackStateRepository? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        playbackStateRepository ?: playbackStateRepositoryProvider?.invoke()
+    }
+    private val playbackStateRepository: PlaybackStateRepository?
+        get() = resolvedPlaybackStateRepository
+
     private var controller: Player? = initialPlayer
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
     private var progressJob: Job? = null

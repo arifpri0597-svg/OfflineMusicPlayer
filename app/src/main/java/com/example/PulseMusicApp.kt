@@ -38,26 +38,33 @@ class PulseMusicApp : Application(), ImageLoaderFactory {
         instance = this
     }
 
-    @OptIn( kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun newImageLoader(): ImageLoader {
         val ioDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4)
         val decodeDispatcher = kotlinx.coroutines.Dispatchers.Default.limitedParallelism(2)
         return ImageLoader.Builder(this)
+            .components {
+                add(com.example.ui.components.ArtworkCacheManager.NegativeCacheInterceptor())
+            }
             .fetcherDispatcher(ioDispatcher)
             .decoderDispatcher(decodeDispatcher)
             .transformationDispatcher(decodeDispatcher)
             .memoryCache {
-                MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
-                    .build()
+                runCatching {
+                    MemoryCache.Builder(this)
+                        .maxSizePercent(0.20)
+                        .build()
+                }.getOrNull()
             }
             .diskCache {
-                DiskCache.Builder()
-                    .directory(cacheDir.resolve("album_art_cache"))
-                    .maxSizeBytes(64L * 1024L * 1024L)
-                    .build()
+                runCatching {
+                    DiskCache.Builder()
+                        .directory(cacheDir.resolve("album_art_cache"))
+                        .maxSizeBytes(64L * 1024L * 1024L)
+                        .build()
+                }.getOrNull()
             }
-            .allowHardware(true)
+            .allowHardware(false)
             .allowRgb565(true)
             .crossfade(false)
             .respectCacheHeaders(false)

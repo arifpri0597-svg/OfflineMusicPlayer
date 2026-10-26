@@ -79,6 +79,20 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MusicViewModel by viewModels()
 
+    @Volatile
+    private var isPermissionRequestInFlight: Boolean = false
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissionsMap: Map<String, @JvmSuppressWildcards Boolean>? ->
+        isPermissionRequestInFlight = false
+        if (isFinishing || isDestroyed) return@registerForActivityResult
+        val requiredPerm = requiredAudioPermission()
+        val grantedFromCallback = permissionsMap?.get(requiredPerm) == true
+        val effectiveAudioGranted = grantedFromCallback || checkAudioPermission()
+        viewModel.onPermissionResult(effectiveAudioGranted)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -154,6 +168,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (isFinishing || isDestroyed || isPermissionRequestInFlight) return
         // Re-check permissions on resume (e.g., if user returned from Settings or permission dialog)
         val hasPermission = checkAudioPermission()
         viewModel.onPermissionResult(hasPermission)
@@ -173,62 +188,42 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun requiredAudioPermission(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+    }
+
     private fun checkAudioPermission(): Boolean {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.READ_MEDIA_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
-            } else {
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.READ_EXTERNAL_STORAGE
-                ) == PackageManager.PERMISSION_GRANTED
-            }
-        } catch (_: Exception) {
+            ContextCompat.checkSelfPermission(
+                applicationContext,
+                requiredAudioPermission()
+            ) == PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) {
             false
         }
     }
 
     private fun checkAndRequestPermissions() {
-        val permissionsToRequest = mutableListOf<String>()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_AUDIO)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-
-        if (permissionsToRequest.isNotEmpty()) {
-            try {
-                requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
-            } catch (_: Exception) {
-                viewModel.onPermissionResult(checkAudioPermission())
-            }
-        } else {
+        if (isFinishing || isDestroyed) return
+        if (checkAudioPermission()) {
+            isPermissionRequestInFlight = false
             viewModel.onPermissionResult(true)
+            return
         }
-    }
+        if (isPermissionRequestInFlight) return
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissionsMap: Map<String, @JvmSuppressWildcards Boolean>? ->
-        val safeMap = permissionsMap ?: emptyMap()
-        val audioGrantedFromCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            safeMap[Manifest.permission.READ_MEDIA_AUDIO] == true
-        } else {
-            safeMap[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        val requiredPerm = requiredAudioPermission()
+        isPermissionRequestInFlight = true
+        try {
+            requestPermissionLauncher.launch(arrayOf(requiredPerm))
+        } catch (_: Throwable) {
+            isPermissionRequestInFlight = false
+            viewModel.onPermissionResult(checkAudioPermission())
         }
-        val effectiveAudioGranted = audioGrantedFromCallback || checkAudioPermission()
-        viewModel.onPermissionResult(effectiveAudioGranted)
     }
 }
 
@@ -271,15 +266,16 @@ fun PulseMusicAppRoot(
         }
     }
 
-    if (!libraryState.hasPermission && !hasCurrentSong) {
-        PermissionView(
-            onRequestPermission = onRequestPermission
-        )
-        return
-    }
-
     // Handle back button when sub-screens or expanded Now Playing are active
-    BackHandler(enabled = (libraryState.selectedTab != NavigationTab.HOME || libraryState.selectedPlaylist != null || libraryState.selectedAlbum != null || libraryState.selectedArtist != null || libraryState.selectedFolder != null) && !libraryState.isNowPlayingExpanded) {
+    BackHandler(
+        enabled = (libraryState.hasPermission || hasCurrentSong) &&
+            (libraryState.selectedTab != NavigationTab.HOME ||
+                libraryState.selectedPlaylist != null ||
+                libraryState.selectedAlbum != null ||
+                libraryState.selectedArtist != null ||
+                libraryState.selectedFolder != null) &&
+            !libraryState.isNowPlayingExpanded
+    ) {
         if (libraryState.selectedPlaylist != null) {
             viewModel.selectPlaylist(null)
         } else if (libraryState.selectedAlbum != null) {
@@ -369,8 +365,13 @@ fun PulseMusicAppRoot(
     val onSearchQueryChange = remember(viewModel) { { query: String -> viewModel.setSearchQuery(query) } }
     val onSortOrderChange = remember(viewModel) { { order: com.example.data.model.SortOrder -> viewModel.setSortOrder(order) } }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
+    if (!libraryState.hasPermission && !hasCurrentSong) {
+        PermissionView(
+            onRequestPermission = onRequestPermission
+        )
+    } else {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -635,6 +636,7 @@ fun PulseMusicAppRoot(
                     viewModel.createPlaylistAndAddSong(name, songToAdd)
                 }
             )
+        }
         }
     }
 }

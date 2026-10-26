@@ -98,7 +98,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val playerController: MusicPlayerController = MusicPlayerController(
         context = application,
         scope = viewModelScope,
-        playbackStateRepository = playbackStateRepository
+        playbackStateRepositoryProvider = { playbackStateRepository }
     )
 
     val playerUiState: StateFlow<PlayerUiState> = playerController.uiState
@@ -285,19 +285,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 playerController.restorePlaybackState(songsList)
                             } catch (e: kotlinx.coroutines.CancellationException) {
                                 throw e
-                            } catch (e: Exception) {
+                            } catch (e: Throwable) {
                                 e.printStackTrace()
                             }
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         e.printStackTrace()
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
@@ -327,7 +327,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
@@ -344,7 +344,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
@@ -360,7 +360,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
@@ -373,7 +373,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
@@ -386,7 +386,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
@@ -417,13 +417,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 audioScanRepository.scanAndSyncDeviceAudio()
                 val currentSongs = _libraryState.value.songs
-                if (_libraryState.value.resumeLastPlayback && currentSongs.isNotEmpty()) {
-                    hasAttemptedInitialRestore.set(true)
+                if (_libraryState.value.resumeLastPlayback &&
+                    currentSongs.isNotEmpty() &&
+                    hasAttemptedInitialRestore.compareAndSet(false, true)
+                ) {
                     playerController.restorePlaybackState(currentSongs)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
             } finally {
                 isScanInFlight.set(false)

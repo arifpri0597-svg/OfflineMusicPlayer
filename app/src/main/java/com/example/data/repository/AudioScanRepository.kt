@@ -68,19 +68,34 @@ class AudioScanRepository(
 
             // Filter out non-music and files shorter than 3 seconds (ringtones/clicks/UI sounds)
             val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 3000"
-            val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+            // Android 10–13+ MediaProvider strict SQLite sortOrder validator only allows column + ASC/DESC
+            val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
-            contentResolver.query(
-                collectionUri,
-                projection,
-                selection,
-                null,
-                sortOrder
-            )?.use { cursor ->
+            val queryCursor: Cursor? = try {
+                contentResolver.query(
+                    collectionUri,
+                    projection,
+                    selection,
+                    null,
+                    sortOrder
+                )
+            } catch (_: IllegalArgumentException) {
+                // Fallback if OEM MediaProvider rejects selection or sortOrder grammar
+                contentResolver.query(
+                    collectionUri,
+                    projection,
+                    null,
+                    null,
+                    null
+                )
+            }
+
+            queryCursor?.use { cursor ->
                 val count = cursor.count.coerceAtLeast(0)
                 if (count > 256) {
                     scannedEntities = ArrayList(count)
                 }
+                val seenIds = HashSet<Long>(count.coerceAtLeast(16))
                 val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
                 if (idCol == -1) return@use
                 val titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
@@ -111,10 +126,10 @@ class AudioScanRepository(
                             dateAddedCol = dateAddedCol,
                             dataCol = dataCol
                         )
-                        if (entity != null) {
+                        if (entity != null && seenIds.add(entity.id)) {
                             scannedEntities.add(entity)
                         }
-                    } catch (_: Exception) {
+                    } catch (_: Throwable) {
                         // Skip malformed MediaStore row without aborting entire scan
                     }
                 }
@@ -124,13 +139,48 @@ class AudioScanRepository(
             musicDao.syncScannedSongs(scannedEntities)
         } catch (_: SecurityException) {
             // Permission revoked or unavailable at OS level; do not wipe existing Room cache
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             e.printStackTrace()
         } finally {
             scanMutex.unlock()
         }
 
         scannedEntities
+    }
+
+    private fun Cursor.getLongSafe(col: Int, default: Long = 0L): Long {
+        if (col == -1) return default
+        return try {
+            if (isNull(col)) default else getLong(col)
+        } catch (_: Throwable) {
+            try {
+                getString(col)?.trim()?.toLongOrNull() ?: default
+            } catch (_: Throwable) {
+                default
+            }
+        }
+    }
+
+    private fun Cursor.getIntSafe(col: Int, default: Int = 0): Int {
+        if (col == -1) return default
+        return try {
+            if (isNull(col)) default else getInt(col)
+        } catch (_: Throwable) {
+            try {
+                getString(col)?.trim()?.toIntOrNull() ?: default
+            } catch (_: Throwable) {
+                default
+            }
+        }
+    }
+
+    private fun Cursor.getStringSafe(col: Int): String? {
+        if (col == -1) return null
+        return try {
+            if (isNull(col)) null else getString(col)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     /**
@@ -152,18 +202,18 @@ class AudioScanRepository(
         dateAddedCol: Int,
         dataCol: Int
     ): SongEntity? {
-        if (idCol == -1 || cursor.isNull(idCol)) return null
-        val id = cursor.getLong(idCol)
-        val rawTitle = if (titleCol != -1 && !cursor.isNull(titleCol)) cursor.getString(titleCol) else null
-        val rawArtist = if (artistCol != -1 && !cursor.isNull(artistCol)) cursor.getString(artistCol) else null
-        val rawAlbum = if (albumCol != -1 && !cursor.isNull(albumCol)) cursor.getString(albumCol) else null
-        val albumId = if (albumIdCol != -1 && !cursor.isNull(albumIdCol)) cursor.getLong(albumIdCol) else 0L
-        val duration = if (durationCol != -1 && !cursor.isNull(durationCol)) cursor.getLong(durationCol).coerceAtLeast(0L) else 0L
-        val track = if (trackCol != -1 && !cursor.isNull(trackCol)) cursor.getInt(trackCol) else 0
-        val year = if (yearCol != -1 && !cursor.isNull(yearCol)) cursor.getInt(yearCol) else 0
-        val size = if (sizeCol != -1 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol).coerceAtLeast(0L) else 0L
-        val dateAdded = if (dateAddedCol != -1 && !cursor.isNull(dateAddedCol)) cursor.getLong(dateAddedCol).coerceAtLeast(0L) else 0L
-        val filePath = if (dataCol != -1 && !cursor.isNull(dataCol)) cursor.getString(dataCol) ?: "" else ""
+        val id = cursor.getLongSafe(idCol, -1L)
+        if (id <= 0L) return null
+        val rawTitle = cursor.getStringSafe(titleCol)
+        val rawArtist = cursor.getStringSafe(artistCol)
+        val rawAlbum = cursor.getStringSafe(albumCol)
+        val albumId = cursor.getLongSafe(albumIdCol, 0L)
+        val duration = cursor.getLongSafe(durationCol, 0L).coerceAtLeast(0L)
+        val track = cursor.getIntSafe(trackCol, 0)
+        val year = cursor.getIntSafe(yearCol, 0)
+        val size = cursor.getLongSafe(sizeCol, 0L).coerceAtLeast(0L)
+        val dateAdded = cursor.getLongSafe(dateAddedCol, 0L).coerceAtLeast(0L)
+        val filePath = cursor.getStringSafe(dataCol) ?: ""
 
         val contentUri = ContentUris.withAppendedId(collectionUri, id)
         val albumArtUri = if (albumId > 0L) {
@@ -222,9 +272,17 @@ class AudioScanRepository(
                 if (domainSongCache.size > songEntities.size * 2 + 64) {
                     domainSongCache.clear()
                 }
-                songEntities.map { entity ->
-                    domainSongCache.getOrPut(entity) { entity.toDomainSong(isFavorite = false) }
+                val seenIds = HashSet<Long>(songEntities.size.coerceAtLeast(16))
+                val result = ArrayList<Song>(songEntities.size)
+                for (entity in songEntities) {
+                    if (seenIds.add(entity.id)) {
+                        val domainSong = domainSongCache.getOrPut(entity) {
+                            entity.toDomainSong(isFavorite = false)
+                        }
+                        result.add(domainSong)
+                    }
                 }
+                result
             }
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
@@ -258,18 +316,21 @@ class AudioScanRepository(
      * Extracts distinct Album groupings from a list of domain songs on a background thread.
      */
     suspend fun getAlbums(songs: List<Song>): List<Album> = withContext(Dispatchers.Default) {
-        songs.groupBy { it.album }
-            .map { (albumTitle, songGroup) ->
-                val firstSong = songGroup.first()
+        if (songs.isEmpty()) return@withContext emptyList()
+        songs.groupBy { it.album.lowercase(java.util.Locale.ROOT) }
+            .mapNotNull { (_, songGroup) ->
+                val firstSong = songGroup.firstOrNull() ?: return@mapNotNull null
+                val artworkSong = songGroup.firstOrNull { it.albumArtUri != null } ?: firstSong
                 Album(
                     id = firstSong.id,
-                    title = albumTitle,
-                    artist = firstSong.artist,
-                    artworkUri = firstSong.albumArtUri,
+                    title = firstSong.album.ifBlank { "Unknown Album" },
+                    artist = firstSong.artist.ifBlank { "Unknown Artist" },
+                    artworkUri = artworkSong.albumArtUri,
                     songCount = songGroup.size,
                     year = firstSong.year
                 )
             }
+            .distinctBy { "${it.id}_${it.title}" }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     }
 
@@ -277,18 +338,21 @@ class AudioScanRepository(
      * Extracts distinct Artist groupings from a list of domain songs on a background thread.
      */
     suspend fun getArtists(songs: List<Song>): List<Artist> = withContext(Dispatchers.Default) {
-        songs.groupBy { it.artist }
-            .map { (artistName, songGroup) ->
+        if (songs.isEmpty()) return@withContext emptyList()
+        songs.groupBy { it.artist.lowercase(java.util.Locale.ROOT) }
+            .mapNotNull { (_, songGroup) ->
+                val firstSong = songGroup.firstOrNull() ?: return@mapNotNull null
                 val distinctAlbums = HashSet<String>()
                 for (song in songGroup) {
-                    distinctAlbums.add(song.album)
+                    distinctAlbums.add(song.album.lowercase(java.util.Locale.ROOT))
                 }
                 Artist(
-                    name = artistName,
+                    name = firstSong.artist.ifBlank { "Unknown Artist" },
                     songCount = songGroup.size,
                     albumCount = distinctAlbums.size
                 )
             }
+            .distinctBy { it.name }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 
@@ -296,18 +360,21 @@ class AudioScanRepository(
      * Extracts distinct Folder groupings from a list of domain songs on a background thread.
      */
     suspend fun getFolders(songs: List<Song>): List<Folder> = withContext(Dispatchers.Default) {
-        songs.groupBy { it.folderName }
-            .map { (folderName, songGroup) ->
-                val firstPath = songGroup.firstOrNull()?.path ?: ""
+        if (songs.isEmpty()) return@withContext emptyList()
+        songs.groupBy { it.folderName.lowercase(java.util.Locale.ROOT) }
+            .mapNotNull { (_, songGroup) ->
+                val firstSong = songGroup.firstOrNull() ?: return@mapNotNull null
+                val firstPath = firstSong.path
                 val parentPath = if (firstPath.isNotBlank()) {
                     firstPath.substringBeforeLast('/', "")
                 } else ""
                 Folder(
-                    name = folderName,
+                    name = firstSong.folderName.ifBlank { "Music" },
                     path = parentPath,
                     songCount = songGroup.size
                 )
             }
+            .distinctBy { "${it.name}_${it.path}" }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
     }
 

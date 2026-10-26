@@ -128,13 +128,15 @@ fun FastArtworkImage(
             null
         } else {
             runCatching {
-                val key = "${cacheKeyPrefix}_${safeSizePx}_$uriString"
-                ImageRequest.Builder(context)
+                val memKey = "${cacheKeyPrefix}_${safeSizePx}_$uriString"
+                val diskKey = "${cacheKeyPrefix}_${safeSizePx}_${uriString.hashCode().toUInt().toString(16)}"
+                ImageRequest.Builder(context.applicationContext)
                     .data(artworkUri)
-                    .memoryCacheKey(key)
-                    .diskCacheKey(key)
+                    .memoryCacheKey(memKey)
+                    .diskCacheKey(diskKey)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
+                    .allowHardware(false)
                     .crossfade(false)
                     .size(safeSizePx, safeSizePx)
                     .precision(Precision.INEXACT)
