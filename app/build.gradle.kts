@@ -1,4 +1,5 @@
 import java.util.Base64
+import java.util.zip.ZipFile
 
 plugins {
   alias(libs.plugins.android.application)
@@ -60,7 +61,7 @@ android {
         enableV1Signing = true
         enableV2Signing = true
         enableV3Signing = true
-        enableV4Signing = true
+        enableV4Signing = false
       }
     }
   }
@@ -150,7 +151,7 @@ androidComponents {
       enableV1Signing.set(true)
       enableV2Signing.set(true)
       enableV3Signing.set(true)
-      enableV4Signing.set(true)
+      enableV4Signing.set(false)
     }
   }
 }
@@ -247,7 +248,24 @@ abstract class VerifyDebugApkTask : DefaultTask() {
     if (!apkFile.exists() || apkFile.length() == 0L) {
       throw GradleException("APK not found or empty at ${apkFile.absolutePath}")
     }
-    println("APK_FILE=${apkFile.absolutePath} (${apkFile.length()} bytes)")
+    println("APK_VERIFIED_PATH=${apkFile.absolutePath} (${apkFile.length()} bytes)")
+
+    ZipFile(apkFile).use { zip ->
+      val entries = zip.entries().asSequence().toList()
+      val hasManifest = entries.any { it.name == "AndroidManifest.xml" }
+      val hasDex = entries.any { it.name == "classes.dex" }
+      val hasResources = entries.any { it.name == "resources.arsc" }
+      if (!hasManifest || !hasDex || !hasResources) {
+        throw GradleException("APK is missing core entries (AndroidManifest.xml, classes.dex, or resources.arsc)")
+      }
+      val abis =
+          entries
+              .filter { it.name.startsWith("lib/") && it.name.endsWith(".so") }
+              .map { it.name.split("/")[1] }
+              .distinct()
+              .sorted()
+      println("APK_VERIFIED_ENTRIES=${entries.size}, ABIS=$abis")
+    }
 
     val sdkRoot =
         System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk"
@@ -259,6 +277,8 @@ abstract class VerifyDebugApkTask : DefaultTask() {
             ProcessBuilder(
                     apksigner.absolutePath,
                     "verify",
+                    "--min-sdk-version",
+                    "21",
                     "--verbose",
                     "--print-certs",
                     apkFile.absolutePath)
@@ -266,8 +286,9 @@ abstract class VerifyDebugApkTask : DefaultTask() {
                 .start()
         val out = proc.inputStream.bufferedReader().readText()
         val code = proc.waitFor()
-        println("=== APKSIGNER VERIFY (exit=$code) ===\n$out")
-        if (code != 0) throw GradleException("apksigner verify failed")
+        val summary = out.lines().take(18).joinToString(" | ")
+        println("APKSIGNER_SUMMARY (exit=$code): $summary")
+        if (code != 0) throw GradleException("apksigner verify failed:\n$out")
       }
       val aapt2 = File(buildToolsDir, "aapt2")
       if (aapt2.exists()) {
@@ -275,10 +296,11 @@ abstract class VerifyDebugApkTask : DefaultTask() {
             ProcessBuilder(aapt2.absolutePath, "dump", "badging", apkFile.absolutePath)
                 .redirectErrorStream(true)
                 .start()
-        val out = proc.inputStream.bufferedReader().readLines().take(25).joinToString("\n")
+        val out = proc.inputStream.bufferedReader().readText()
         val code = proc.waitFor()
-        println("=== AAPT2 BADGING (exit=$code) ===\n$out")
-        if (code != 0) throw GradleException("aapt2 dump badging failed")
+        val summary = out.lines().take(5).joinToString(" | ")
+        println("AAPT2_BADGING_SUMMARY (exit=$code): $summary")
+        if (code != 0) throw GradleException("aapt2 dump badging failed:\n$out")
       }
       val zipalign = File(buildToolsDir, "zipalign")
       if (zipalign.exists()) {
@@ -287,7 +309,7 @@ abstract class VerifyDebugApkTask : DefaultTask() {
                 .redirectErrorStream(true)
                 .start()
         val code = proc.waitFor()
-        println("=== ZIPALIGN 4-BYTE CHECK (exit=$code) ===")
+        println("ZIPALIGN_CHECK (exit=$code)")
         if (code != 0) throw GradleException("zipalign check failed")
       }
     }
