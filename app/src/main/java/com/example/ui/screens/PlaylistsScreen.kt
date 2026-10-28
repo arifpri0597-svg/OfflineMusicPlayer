@@ -98,6 +98,9 @@ fun PlaylistsScreen(
         BackHandler {
             onPlaylistSelect(null)
         }
+        val onPlaylistSongClick = remember(onSongClick, playlistSongs) {
+            { song: Song -> onSongClick(song, playlistSongs) }
+        }
 
         LazyColumn(
             modifier = modifier
@@ -105,7 +108,7 @@ fun PlaylistsScreen(
                 .testTag("playlist_detail_screen"),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item {
+            item(key = "playlist_detail_header", contentType = "header") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -231,7 +234,7 @@ fun PlaylistsScreen(
             }
 
             if (playlistSongs.isEmpty()) {
-                item {
+                item(key = "playlist_empty_state", contentType = "empty") {
                     EmptyStateView(
                         icon = Icons.AutoMirrored.Filled.PlaylistAdd,
                         title = "Playlist is Empty",
@@ -256,7 +259,7 @@ fun PlaylistsScreen(
                                 song = song,
                                 isPlaying = isPlaying && currentSongId == song.id,
                                 isFavorite = favoriteIds.contains(song.id),
-                                onSongClick = { onSongClick(song, playlistSongs) },
+                                onSongClick = { onPlaylistSongClick(song) },
                                 onToggleFavorite = { onToggleFavorite(song.id) },
                                 onPlayNext = { onPlayNext(song) },
                                 onAddToQueue = { onAddToQueue(song) }

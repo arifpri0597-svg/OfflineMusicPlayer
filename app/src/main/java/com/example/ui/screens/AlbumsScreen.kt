@@ -81,6 +81,9 @@ fun AlbumsScreen(
             songsByAlbum[selectedAlbum.title.lowercase(java.util.Locale.ROOT)]
                 ?: allSongs.filter { it.album.equals(selectedAlbum.title, ignoreCase = true) }
         }
+        val onAlbumSongClick = remember(onSongClick, albumSongs) {
+            { song: Song -> onSongClick(song, albumSongs) }
+        }
 
         LazyColumn(
             modifier = modifier
@@ -111,7 +114,7 @@ fun AlbumsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         com.example.ui.components.FastArtworkImage(
-                            artworkUri = selectedAlbum.artworkUri,
+                            artworkUri = selectedAlbum.artworkUriString,
                             cacheKeyPrefix = "album",
                             sizePx = 256,
                             contentDescription = selectedAlbum.title,
@@ -191,7 +194,7 @@ fun AlbumsScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onSongClick(song, albumSongs) },
+                    onSongClick = { onAlbumSongClick(song) },
                     onToggleFavorite = { onToggleFavorite(song.id) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },
@@ -219,7 +222,7 @@ fun AlbumsScreen(
             ) {
                 items(
                     items = albums,
-                    key = { "${it.id}_${it.title}" },
+                    key = { it.stableKey },
                     contentType = { "album_card" }
                 ) { album ->
                     AlbumCard(

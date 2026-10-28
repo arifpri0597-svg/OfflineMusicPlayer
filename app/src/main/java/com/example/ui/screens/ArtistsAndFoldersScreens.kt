@@ -70,6 +70,9 @@ fun ArtistsScreen(
             songsByArtist[selectedArtist.name.lowercase(java.util.Locale.ROOT)]
                 ?: allSongs.filter { it.artist.equals(selectedArtist.name, ignoreCase = true) }
         }
+        val onArtistSongClick = remember(onSongClick, artistSongs) {
+            { song: Song -> onSongClick(song, artistSongs) }
+        }
 
         LazyColumn(
             modifier = modifier
@@ -132,7 +135,7 @@ fun ArtistsScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onSongClick(song, artistSongs) },
+                    onSongClick = { onArtistSongClick(song) },
                     onToggleFavorite = { onToggleFavorite(song.id) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },
@@ -198,6 +201,9 @@ fun FoldersScreen(
             songsByFolder[selectedFolder.name.lowercase(java.util.Locale.ROOT)]
                 ?: allSongs.filter { it.folderName.equals(selectedFolder.name, ignoreCase = true) }
         }
+        val onFolderSongClick = remember(onSongClick, folderSongs) {
+            { song: Song -> onSongClick(song, folderSongs) }
+        }
 
         LazyColumn(
             modifier = modifier
@@ -260,7 +266,7 @@ fun FoldersScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onSongClick(song, folderSongs) },
+                    onSongClick = { onFolderSongClick(song) },
                     onToggleFavorite = { onToggleFavorite(song.id) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },
@@ -285,7 +291,7 @@ fun FoldersScreen(
             ) {
                 items(
                     items = folders,
-                    key = { "${it.name}_${it.path}" },
+                    key = { it.stableKey },
                     contentType = { "folder_row" }
                 ) { folder ->
                     FolderItemRow(

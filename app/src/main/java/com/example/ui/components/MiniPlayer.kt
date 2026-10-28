@@ -136,7 +136,7 @@ fun MiniPlayer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     MiniPlayerArtwork(
-                        albumArtUriString = song.albumArtUri?.toString(),
+                        albumArtUriString = song.albumArtUriString,
                         isBuffering = playerState.isBuffering
                     )
 
@@ -165,7 +165,7 @@ fun MiniPlayer(
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             MiniPlayerPositionText(
-                                fallbackFormattedPosition = playerState.formattedPosition,
+                                fallbackPositionMs = playerState.positionMs,
                                 progressFlow = progressFlow
                             )
                         }
@@ -219,20 +219,23 @@ private fun MiniPlayerProgressBar(
 
 @Composable
 private fun MiniPlayerPositionText(
-    fallbackFormattedPosition: String,
+    fallbackPositionMs: Long,
     progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>?
 ) {
-    val formattedText = if (progressFlow != null) {
+    val currentSecond = if (progressFlow != null) {
         val liveState = progressFlow.collectAsState()
-        val derivedText by remember {
-            derivedStateOf { liveState.value.formattedPosition }
+        val derivedSecond by remember {
+            derivedStateOf { liveState.value.positionMs / 1000L }
         }
-        derivedText
+        derivedSecond
     } else {
-        fallbackFormattedPosition
+        fallbackPositionMs / 1000L
+    }
+    val displayLabel = remember(currentSecond) {
+        " • ${com.example.data.model.Song.formatDurationMs(currentSecond * 1000L)}"
     }
     Text(
-        text = " • $formattedText",
+        text = displayLabel,
         style = MaterialTheme.typography.labelSmall,
         color = NeonPink
     )

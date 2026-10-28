@@ -312,6 +312,9 @@ fun ScannedAudioListScreen(
                     )
                 }
             } else {
+                val onScannedSongClick = remember(onSongClick, filteredAndSortedSongs) {
+                    { song: Song -> onSongClick(song, filteredAndSortedSongs) }
+                }
                 // Main LazyColumn
                 LazyColumn(
                     modifier = Modifier
@@ -362,7 +365,7 @@ fun ScannedAudioListScreen(
                             song = song,
                             isPlaying = isCurrentPlaying,
                             isFavorite = isFavorite,
-                            onSongClick = { onSongClick(song, filteredAndSortedSongs) },
+                            onSongClick = { onScannedSongClick(song) },
                             onToggleFavorite = { onToggleFavorite(song.id) },
                             onPlayNext = { onPlayNext(song) },
                             onAddToQueue = { onAddToQueue(song) },
@@ -406,12 +409,12 @@ private fun ScannedAudioItemRow(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Artwork / Thumbnail with negative URI cache
+        // Artwork / Thumbnail with synchronous LruCache & negative URI cache
         com.example.ui.components.FastArtworkImage(
-            artworkUri = song.albumArtUri,
+            artworkUri = song.albumArtUriString,
             cacheKeyPrefix = "thumb",
             sizePx = 144,
-            contentDescription = "Cover for ${song.title}",
+            contentDescription = song.title,
             modifier = Modifier
                 .size(50.dp)
                 .clip(ScannedThumbShape)
@@ -439,7 +442,7 @@ private fun ScannedAudioItemRow(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${song.artist} • ${song.album}",
+                    text = song.artistAlbumSubtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -452,9 +455,9 @@ private fun ScannedAudioItemRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    if (song.folderName.isNotBlank()) {
+                    if (song.folderSuffix.isNotEmpty()) {
                         Text(
-                            text = " • ${song.folderName}",
+                            text = song.folderSuffix,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

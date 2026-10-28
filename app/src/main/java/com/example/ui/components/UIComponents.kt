@@ -130,15 +130,15 @@ fun SongItemRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(SongRowShape)
             .background(color = cardBgColor, shape = SongRowShape)
             .border(width = 1.dp, color = borderColor, shape = SongRowShape)
+            .clip(SongRowShape)
             .clickable(onClick = onSongClick)
             .testTag("song_item_${song.id}")
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Album art thumbnail with neon gradient backdrop & negative URI cache
+        // Album art thumbnail with neon gradient backdrop & synchronous LruCache
         Box(
             modifier = Modifier
                 .size(52.dp)
@@ -147,7 +147,7 @@ fun SongItemRow(
             contentAlignment = Alignment.Center
         ) {
             FastArtworkImage(
-                artworkUri = song.albumArtUri,
+                artworkUri = song.albumArtUriString,
                 cacheKeyPrefix = "thumb",
                 sizePx = 144,
                 contentDescription = "Album art",
@@ -203,7 +203,7 @@ fun SongItemRow(
                     modifier = Modifier.weight(1f, fill = false)
                 )
                 Text(
-                    text = " • ${song.formattedDuration}",
+                    text = song.durationSuffix,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isPlaying) NeonPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                 )
@@ -295,7 +295,7 @@ fun AlbumCard(
     ) {
         Column {
             FastArtworkImage(
-                artworkUri = album.artworkUri,
+                artworkUri = album.artworkUriString,
                 cacheKeyPrefix = "album",
                 sizePx = 256,
                 contentDescription = album.title,
@@ -321,7 +321,7 @@ fun AlbumCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${album.artist} • ${album.songCount} tracks",
+                    text = album.tracksSubtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -344,9 +344,9 @@ fun ArtistItemRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(SongRowShape)
             .background(color = bgColor, shape = SongRowShape)
             .border(width = 1.dp, color = borderColor, shape = SongRowShape)
+            .clip(SongRowShape)
             .clickable(onClick = onClick)
             .testTag("artist_item_${artist.name}")
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -355,8 +355,7 @@ fun ArtistItemRow(
         Box(
             modifier = Modifier
                 .size(52.dp)
-                .clip(CircleShape)
-                .background(ArtistAvatarBrush),
+                .background(ArtistAvatarBrush, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -375,7 +374,7 @@ fun ArtistItemRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "${artist.songCount} songs • ${artist.albumCount} albums",
+                text = artist.subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -395,9 +394,9 @@ fun FolderItemRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(SongRowShape)
             .background(color = bgColor, shape = SongRowShape)
             .border(width = 1.dp, color = borderColor, shape = SongRowShape)
+            .clip(SongRowShape)
             .clickable(onClick = onClick)
             .testTag("folder_item_${folder.name}")
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -406,8 +405,7 @@ fun FolderItemRow(
         Box(
             modifier = Modifier
                 .size(48.dp)
-                .clip(SongThumbShape)
-                .background(FolderIconBrush),
+                .background(FolderIconBrush, SongThumbShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -426,7 +424,7 @@ fun FolderItemRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "${folder.songCount} audio files",
+                text = folder.subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

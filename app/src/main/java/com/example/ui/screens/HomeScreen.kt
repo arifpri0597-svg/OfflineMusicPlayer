@@ -158,25 +158,37 @@ fun HomeScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
     val albumsPreview = remember(precomputedAlbumsPreview, albums) {
-        precomputedAlbumsPreview.ifEmpty { albums.take(10) }
-            .distinctBy { "${it.id}_${it.title}" }
+        if (precomputedAlbumsPreview.isNotEmpty()) {
+            precomputedAlbumsPreview
+        } else {
+            albums.asSequence().distinctBy { it.stableKey }.take(10).toList()
+        }
     }
     val favoritesPreview = remember(precomputedFavoritesPreview, favoriteSongs) {
-        precomputedFavoritesPreview.ifEmpty { favoriteSongs.take(5) }
-            .distinctBy { it.id }
+        if (precomputedFavoritesPreview.isNotEmpty()) {
+            precomputedFavoritesPreview
+        } else {
+            favoriteSongs.asSequence().distinctBy { it.id }.take(5).toList()
+        }
     }
     val filteredAllTracks = remember(precomputedTracksPreview, songs, searchQuery) {
-        val raw = if (searchQuery.isBlank()) {
-            precomputedTracksPreview.ifEmpty { songs.take(15) }
+        if (searchQuery.isBlank()) {
+            if (precomputedTracksPreview.isNotEmpty()) {
+                precomputedTracksPreview
+            } else {
+                songs.asSequence().distinctBy { it.id }.take(15).toList()
+            }
         } else {
             val q = searchQuery.trim()
-            songs.filter {
-                it.title.contains(q, ignoreCase = true) ||
-                    it.artist.contains(q, ignoreCase = true) ||
-                    it.album.contains(q, ignoreCase = true)
-            }
+            songs.asSequence()
+                .filter {
+                    it.title.contains(q, ignoreCase = true) ||
+                        it.artist.contains(q, ignoreCase = true) ||
+                        it.album.contains(q, ignoreCase = true)
+                }
+                .distinctBy { it.id }
+                .toList()
         }
-        raw.distinctBy { it.id }
     }
     val favoriteIdSet = remember(favoriteIds, favoriteSongs) {
         if (favoriteIds.isNotEmpty() || favoriteSongs.isEmpty()) {
@@ -184,6 +196,12 @@ fun HomeScreen(
         } else {
             favoriteSongs.mapTo(HashSet(favoriteSongs.size)) { it.id }
         }
+    }
+    val onFavoriteSongClick = remember(onSongClick, favoriteSongs) {
+        { song: Song -> onSongClick(song, favoriteSongs) }
+    }
+    val onAllTrackSongClick = remember(onSongClick, songs) {
+        { song: Song -> onSongClick(song, songs) }
     }
 
     if (songs.isEmpty()) {
@@ -404,7 +422,7 @@ fun HomeScreen(
                     ) {
                         items(
                             items = albumsPreview,
-                            key = { "${it.id}_${it.title}" },
+                            key = { it.stableKey },
                             contentType = { "album_card" }
                         ) { album ->
                             HomeAlbumCard(
@@ -463,7 +481,7 @@ fun HomeScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = true,
-                    onSongClick = { onSongClick(song, favoriteSongs) },
+                    onSongClick = { onFavoriteSongClick(song) },
                     onToggleFavorite = { onToggleFavorite(song.id) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },
@@ -518,7 +536,7 @@ fun HomeScreen(
                 song = song,
                 isPlaying = isPlaying && currentSongId == song.id,
                 isFavorite = song.isFavorite || favoriteIdSet.contains(song.id),
-                onSongClick = { onSongClick(song, songs) },
+                onSongClick = { onAllTrackSongClick(song) },
                 onToggleFavorite = { onToggleFavorite(song.id) },
                 onPlayNext = { onPlayNext(song) },
                 onAddToQueue = { onAddToQueue(song) },
@@ -808,7 +826,7 @@ private fun HomeAlbumCard(
     ) {
         Column {
             com.example.ui.components.FastArtworkImage(
-                artworkUri = album.artworkUri,
+                artworkUri = album.artworkUriString,
                 cacheKeyPrefix = "album",
                 sizePx = 256,
                 contentDescription = album.title,
@@ -832,7 +850,7 @@ private fun HomeAlbumCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${album.songCount} songs",
+                    text = album.songCountLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = NeonPurple
                 )

@@ -88,6 +88,10 @@ android {
   }
 }
 
+composeCompiler {
+  stabilityConfigurationFiles.add(layout.projectDirectory.file("compose_stability.conf"))
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {

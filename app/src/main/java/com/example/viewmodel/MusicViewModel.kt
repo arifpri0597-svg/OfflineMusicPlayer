@@ -22,12 +22,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -103,7 +105,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     val playerUiState: StateFlow<PlayerUiState> = playerController.uiState
 
-    val staticPlayerUiState = playerUiState
+    val staticPlayerUiState: StateFlow<PlayerUiState> = playerUiState
         .distinctUntilChanged { old, new ->
             old.currentSong == new.currentSong &&
                 old.currentIndex == new.currentIndex &&
@@ -116,8 +118,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 old.queue === new.queue &&
                 old.errorMessage == new.errorMessage
         }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = playerUiState.value
+        )
 
-    val rootPlaybackSummary = playerUiState
+    val rootPlaybackSummary: StateFlow<RootPlaybackSummary> = playerUiState
         .map { state ->
             RootPlaybackSummary(
                 currentSongId = state.currentSong?.id,
@@ -127,6 +134,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         .distinctUntilChanged()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = RootPlaybackSummary(
+                currentSongId = playerUiState.value.currentSong?.id,
+                isPlaying = playerUiState.value.isPlaying,
+                hasCurrentSong = playerUiState.value.currentSong != null,
+                errorMessage = playerUiState.value.errorMessage
+            )
+        )
 
     private val _libraryState = MutableStateFlow(LibraryUiState())
     val libraryState: StateFlow<LibraryUiState> = _libraryState.asStateFlow()
@@ -263,6 +280,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                         songsByFolder = byFolder,
                                         totalDurationFormatted = durStr,
                                         totalStorageFormatted = sizeStr
+                                    )
+                                }
+
+                                // Prewarm initial visible thumbnails on background threads so first scroll is instant
+                                launch(Dispatchers.IO) {
+                                    val thumbUris = songsList.asSequence()
+                                        .take(30)
+                                        .mapNotNull { it.albumArtUriString }
+                                        .distinct()
+                                        .toList()
+                                    com.example.ui.components.ArtworkCacheManager.prewarmArtwork(
+                                        context = app,
+                                        uriStrings = thumbUris,
+                                        sizePx = 144
+                                    )
+                                    val albumUris = albums.asSequence()
+                                        .take(16)
+                                        .mapNotNull { it.artworkUriString }
+                                        .distinct()
+                                        .toList()
+                                    com.example.ui.components.ArtworkCacheManager.prewarmArtwork(
+                                        context = app,
+                                        uriStrings = albumUris,
+                                        sizePx = 256
                                     )
                                 }
                             }

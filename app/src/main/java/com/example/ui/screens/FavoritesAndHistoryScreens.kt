@@ -57,13 +57,16 @@ fun FavoritesScreen(
             modifier = modifier.fillMaxSize()
         )
     } else {
+        val onFavoriteSongClick = androidx.compose.runtime.remember(onSongClick, favoriteSongs) {
+            { song: Song -> onSongClick(song, favoriteSongs) }
+        }
         LazyColumn(
             modifier = modifier
                 .fillMaxSize()
                 .testTag("favorites_screen"),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item {
+            item(key = "favorites_header", contentType = "header") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -97,7 +100,7 @@ fun FavoritesScreen(
                 }
             }
 
-            item {
+            item(key = "favorites_actions", contentType = "actions") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -135,7 +138,7 @@ fun FavoritesScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = true,
-                    onSongClick = { onSongClick(song, favoriteSongs) },
+                    onSongClick = { onFavoriteSongClick(song) },
                     onToggleFavorite = { onToggleFavorite(song.id) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },

@@ -21,6 +21,11 @@ data class Song(
     val isFavorite: Boolean = false
 ) {
     val formattedDuration: String = formatDurationMs(durationMs)
+    val durationSuffix: String = " • $formattedDuration"
+    val artistAlbumSubtitle: String = "$artist • $album"
+    val artistDurationSubtitle: String = "$artist • $formattedDuration"
+    val folderSuffix: String = if (folderName.isNotBlank()) " • $folderName" else ""
+    val albumArtUriString: String? = albumArtUri?.toString()?.takeIf { it.isNotBlank() }
 
     companion object {
         fun formatDurationMs(durationMs: Long): String {

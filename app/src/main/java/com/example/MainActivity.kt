@@ -646,8 +646,7 @@ private fun MiniPlayerSection(
     viewModel: MusicViewModel,
     favoriteIds: Set<Long>
 ) {
-    val initialState = remember(viewModel) { viewModel.playerUiState.value }
-    val staticPlayerState by viewModel.staticPlayerUiState.collectAsState(initial = initialState)
+    val staticPlayerState by viewModel.staticPlayerUiState.collectAsState()
     val currentSongId = staticPlayerState.currentSong?.id
     val isCurrentFavorite = currentSongId != null && favoriteIds.contains(currentSongId)
 
@@ -705,8 +704,7 @@ private fun NowPlayingOverlaySection(
             targetOffsetY = { it }
         )
     ) {
-        val initialState = remember(viewModel) { viewModel.playerUiState.value }
-        val staticPlayerState by viewModel.staticPlayerUiState.collectAsState(initial = initialState)
+        val staticPlayerState by viewModel.staticPlayerUiState.collectAsState()
         val currentSongId = staticPlayerState.currentSong?.id
         val isCurrentFav = currentSongId != null && favoriteIds.contains(currentSongId)
         val onToggleFavorite = remember(viewModel, currentSongId) {
