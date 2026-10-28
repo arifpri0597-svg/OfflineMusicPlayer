@@ -73,8 +73,15 @@ fun ArtistsScreen(
         val onArtistSongClick = remember(onSongClick, artistSongs) {
             { song: Song -> onSongClick(song, artistSongs) }
         }
+        val artistListState = androidx.compose.foundation.lazy.rememberLazyListState()
+        com.example.ui.components.LazyListSongArtworkPreloader(
+            listState = artistListState,
+            songs = artistSongs,
+            headerItemCount = 1
+        )
 
         LazyColumn(
+            state = artistListState,
             modifier = modifier
                 .fillMaxSize()
                 .testTag("artist_detail_screen"),
@@ -204,8 +211,15 @@ fun FoldersScreen(
         val onFolderSongClick = remember(onSongClick, folderSongs) {
             { song: Song -> onSongClick(song, folderSongs) }
         }
+        val folderListState = androidx.compose.foundation.lazy.rememberLazyListState()
+        com.example.ui.components.LazyListSongArtworkPreloader(
+            listState = folderListState,
+            songs = folderSongs,
+            headerItemCount = 1
+        )
 
         LazyColumn(
+            state = folderListState,
             modifier = modifier
                 .fillMaxSize()
                 .testTag("folder_detail_screen"),

@@ -25,6 +25,7 @@ data class Song(
     val artistAlbumSubtitle: String = "$artist • $album"
     val artistDurationSubtitle: String = "$artist • $formattedDuration"
     val folderSuffix: String = if (folderName.isNotBlank()) " • $folderName" else ""
+    val durationFolderSubtitle: String = "$formattedDuration$folderSuffix"
     val contentUriString: String = contentUri.toString()
     val albumArtUriString: String? = albumArtUri?.toString()?.takeIf { it.isNotBlank() }
     val artworkSourceIdentity: String = if (albumArtUriString != null && albumArtUriString != contentUriString) {
@@ -32,6 +33,8 @@ data class Song(
     } else {
         contentUriString
     }
+    val thumbCacheKey: String = "144_$artworkSourceIdentity"
+
 
     companion object {
         fun formatDurationMs(durationMs: Long): String {

@@ -83,8 +83,15 @@ fun AlbumsScreen(
         val onAlbumSongClick = remember(onSongClick, albumSongs) {
             { song: Song -> onSongClick(song, albumSongs) }
         }
+        val detailListState = androidx.compose.foundation.lazy.rememberLazyListState()
+        com.example.ui.components.LazyListSongArtworkPreloader(
+            listState = detailListState,
+            songs = albumSongs,
+            headerItemCount = 1
+        )
 
         LazyColumn(
+            state = detailListState,
             modifier = modifier
                 .fillMaxSize()
                 .testTag("album_detail_screen"),
@@ -119,6 +126,8 @@ fun AlbumsScreen(
                             contentDescription = selectedAlbum.title,
                             fallbackUri = selectedAlbum.fallbackAudioUriString,
                             fallbackPath = selectedAlbum.fallbackAudioPath,
+                            precomputedIdentity = selectedAlbum.artworkSourceIdentity,
+                            precomputedCacheKey = selectedAlbum.albumCacheKey,
                             modifier = Modifier
                                 .size(110.dp)
                                 .clip(RoundedCornerShape(16.dp))
@@ -212,7 +221,13 @@ fun AlbumsScreen(
                 modifier = modifier.fillMaxSize()
             )
         } else {
+            val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+            com.example.ui.components.LazyGridAlbumArtworkPreloader(
+                gridState = gridState,
+                albums = albums
+            )
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(160.dp),
                 modifier = modifier
                     .fillMaxSize()

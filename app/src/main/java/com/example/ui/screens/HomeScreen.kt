@@ -835,6 +835,8 @@ private fun HomeAlbumCard(
             contentDescription = album.title,
             fallbackUri = album.fallbackAudioUriString,
             fallbackPath = album.fallbackAudioPath,
+            precomputedIdentity = album.artworkSourceIdentity,
+            precomputedCacheKey = album.albumCacheKey,
             modifier = Modifier
                 .size(142.dp)
                 .background(HomeAlbumBackdropBrush)

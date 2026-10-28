@@ -454,7 +454,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshLibrary() {
         if (!_libraryState.value.hasPermission) return
         if (!isScanInFlight.compareAndSet(false, true)) return
-        com.example.ui.components.ArtworkCacheManager.clear()
+        com.example.ui.components.ArtworkCacheManager.clearNegativeCacheOnly()
         scanJob = viewModelScope.launch(Dispatchers.IO) {
             _libraryState.update { it.copy(isLoading = true) }
             try {

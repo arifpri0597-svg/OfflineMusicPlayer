@@ -25,6 +25,7 @@ data class Album(
         fallbackAudioPath.isNotBlank() -> "file:${fallbackAudioPath.trim()}"
         else -> ""
     }
+    val albumCacheKey: String = if (artworkSourceIdentity.isNotEmpty()) "256_$artworkSourceIdentity" else ""
     val tracksSubtitle: String = "$artist • $songCount tracks"
     val songCountLabel: String = "$songCount songs"
 }

@@ -186,6 +186,8 @@ fun SongItemRow(
                 contentDescription = "Album art",
                 fallbackUri = song.contentUriString,
                 fallbackPath = song.path,
+                precomputedIdentity = song.artworkSourceIdentity,
+                precomputedCacheKey = song.thumbCacheKey,
                 modifier = Modifier.fillMaxSize()
             ) {
                 Icon(
@@ -215,7 +217,7 @@ fun SongItemRow(
 
         Spacer(modifier = Modifier.width(14.dp))
 
-        // Title & Artist
+        // Title & Artist (flattened to 2 Text nodes without nested weight Row double-measurement)
         Column(
             modifier = Modifier.weight(1f)
         ) {
@@ -228,21 +230,13 @@ fun SongItemRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(3.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = song.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Text(
-                    text = song.durationSuffix,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isPlaying) NeonPurple else colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                )
-            }
+            Text(
+                text = song.artistDurationSubtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isPlaying) NeonPurple else colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
         // Favorite Button
@@ -351,6 +345,8 @@ fun AlbumCard(
             contentDescription = album.title,
             fallbackUri = album.fallbackAudioUriString,
             fallbackPath = album.fallbackAudioPath,
+            precomputedIdentity = album.artworkSourceIdentity,
+            precomputedCacheKey = album.albumCacheKey,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)

@@ -157,7 +157,14 @@ fun SongsScreen(
             val onFilteredSongClick = remember(onSongClick, filteredSongs) {
                 { song: Song -> onSongClick(song, filteredSongs) }
             }
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            com.example.ui.components.LazyListSongArtworkPreloader(
+                listState = listState,
+                songs = filteredSongs,
+                headerItemCount = 1
+            )
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {

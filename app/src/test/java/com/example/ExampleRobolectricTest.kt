@@ -317,6 +317,20 @@ class ExampleRobolectricTest {
                 sizePx = 144
             )
             org.junit.Assert.assertNotNull("Expected 144px thumbnail to decode from file URI", thumbBitmap)
+
+            // 4. Verify clearNegativeCacheOnly() clears negative misses while preserving already-decoded ImageBitmaps
+            com.example.ui.components.ArtworkCacheManager.markMissing("content://media/external/audio/albumart/888888")
+            assertTrue(com.example.ui.components.ArtworkCacheManager.isKnownMissing("content://media/external/audio/albumart/888888"))
+            com.example.ui.components.ArtworkCacheManager.clearNegativeCacheOnly()
+            assertFalse(com.example.ui.components.ArtworkCacheManager.isKnownMissing("content://media/external/audio/albumart/888888"))
+            val preservedThumb = com.example.ui.components.ArtworkCacheManager.getBestAvailableBitmap(
+                primaryUri = fileUriStr,
+                fallbackUri = null,
+                fallbackPath = fallbackFile.absolutePath,
+                sizePx = 144
+            )
+            org.junit.Assert.assertNotNull("Expected clearNegativeCacheOnly() to preserve decoded ImageBitmap in memory", preservedThumb.first)
+            assertEquals(0, com.example.ui.components.ArtworkCacheManager.activeInFlightDecodeCount())
         }
         fallbackFile.delete()
         com.example.ui.components.ArtworkCacheManager.clear()

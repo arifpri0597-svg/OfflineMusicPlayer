@@ -315,8 +315,15 @@ fun ScannedAudioListScreen(
                 val onScannedSongClick = remember(onSongClick, filteredAndSortedSongs) {
                     { song: Song -> onSongClick(song, filteredAndSortedSongs) }
                 }
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                com.example.ui.components.LazyListSongArtworkPreloader(
+                    listState = listState,
+                    songs = filteredAndSortedSongs,
+                    headerItemCount = 1
+                )
                 // Main LazyColumn
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("scanned_audio_lazy_column"),
@@ -421,6 +428,8 @@ private fun ScannedAudioItemRow(
             contentDescription = song.title,
             fallbackUri = song.contentUriString,
             fallbackPath = song.path,
+            precomputedIdentity = song.artworkSourceIdentity,
+            precomputedCacheKey = song.thumbCacheKey,
             modifier = Modifier
                 .size(50.dp)
                 .background(colorScheme.surfaceVariant, ScannedThumbShape)
@@ -455,20 +464,13 @@ private fun ScannedAudioItemRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = song.formattedDuration,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.primary
-                )
-                if (song.folderSuffix.isNotEmpty()) {
-                    Text(
-                        text = song.folderSuffix,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            Text(
+                text = song.durationFolderSubtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
         // Favorite Button
