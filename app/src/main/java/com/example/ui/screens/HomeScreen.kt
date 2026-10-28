@@ -228,7 +228,14 @@ fun HomeScreen(
             )
         }
     } else {
+        val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+        com.example.ui.components.LazyListSongArtworkPreloader(
+            listState = homeListState,
+            songs = filteredAllTracks,
+            headerItemCount = 3
+        )
         LazyColumn(
+            state = homeListState,
             modifier = modifier
                 .fillMaxSize()
                 .background(HomeBackgroundBrush)
@@ -475,7 +482,7 @@ fun HomeScreen(
 
             items(
                 items = favoritesPreview,
-                key = { "fav_${it.id}" },
+                key = { it.homeFavKey },
                 contentType = { "song_row" }
             ) { song ->
                 SongItemRow(
@@ -530,7 +537,7 @@ fun HomeScreen(
 
         items(
             items = filteredAllTracks,
-            key = { "all_${it.id}" },
+            key = { it.homeAllKey },
             contentType = { "song_row" }
         ) { song ->
             SongItemRow(
@@ -837,6 +844,7 @@ private fun HomeAlbumCard(
             fallbackPath = album.fallbackAudioPath,
             precomputedIdentity = album.artworkSourceIdentity,
             precomputedCacheKey = album.albumCacheKey,
+            precomputedPrimaryCacheKey = album.primaryAlbumCacheKey,
             modifier = Modifier
                 .size(142.dp)
                 .background(HomeAlbumBackdropBrush)

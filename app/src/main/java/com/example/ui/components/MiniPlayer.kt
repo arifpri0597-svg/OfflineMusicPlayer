@@ -223,6 +223,8 @@ private fun MiniPlayerProgressBar(
     )
 }
 
+private val TabularTimeFontFeature = "tnum"
+
 @Composable
 private fun MiniPlayerPositionText(
     fallbackPositionMs: Long,
@@ -240,10 +242,15 @@ private fun MiniPlayerPositionText(
     val displayLabel = remember(currentSecond) {
         " • ${com.example.data.model.Song.formatDurationMs(currentSecond * 1000L)}"
     }
+    val baseStyle = MaterialTheme.typography.labelSmall
+    val tabularStyle = remember(baseStyle) {
+        baseStyle.copy(fontFeatureSettings = TabularTimeFontFeature)
+    }
     Text(
         text = displayLabel,
-        style = MaterialTheme.typography.labelSmall,
-        color = NeonPink
+        style = tabularStyle,
+        color = NeonPink,
+        maxLines = 1
     )
 }
 

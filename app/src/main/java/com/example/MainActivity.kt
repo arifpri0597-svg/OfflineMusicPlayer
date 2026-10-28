@@ -11,15 +11,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -491,15 +487,7 @@ fun PulseMusicAppRoot(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                AnimatedContent(
-                    targetState = libraryState.selectedTab,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing)) togetherWith
-                            fadeOut(animationSpec = tween(durationMillis = 110, easing = FastOutSlowInEasing))
-                    },
-                    label = "tab_transition"
-                ) { tab ->
-                    when (tab) {
+                when (libraryState.selectedTab) {
                         NavigationTab.HOME -> {
                             HomeScreen(
                                 songs = libraryState.songs,
@@ -666,7 +654,6 @@ fun PulseMusicAppRoot(
                             )
                         }
                     }
-                }
             }
         }
 

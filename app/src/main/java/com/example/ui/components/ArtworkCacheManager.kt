@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,8 +23,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -47,6 +50,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,6 +73,8 @@ import kotlinx.coroutines.yield
 object ArtworkCacheManager {
     private val missingArtworkUris: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val missingPrimaryOnlyUris: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Records album primary URIs where both the album art URI AND track-level embedded extraction confirmed no art exists
+    private val missingAlbumFallbackUris: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val verifiedArtworkUris: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     // Lock-free read map mirroring LruCache so UI thread lookups during 120Hz scrolling never block on locks
@@ -101,25 +107,41 @@ object ArtworkCacheManager {
         val subscribers: AtomicInteger = AtomicInteger(0)
     )
 
-    // Dedicated high-priority pool for visible UI items vs low-priority pool for lookahead prewarming
+    // Dedicated high-priority pool for visible UI items vs single-thread low-priority pool for idle prewarming
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val uiDecodeDispatcher = Dispatchers.IO.limitedParallelism(4)
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private val prewarmDispatcher = Dispatchers.IO.limitedParallelism(2)
+    private val prewarmDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val diskWriteDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    private val decodeScope = CoroutineScope(SupervisorJob() + uiDecodeDispatcher)
+    private val uiDecodeScope = CoroutineScope(SupervisorJob() + uiDecodeDispatcher)
+    private val prewarmDecodeScope = CoroutineScope(SupervisorJob() + prewarmDispatcher)
     private val diskWriteScope = CoroutineScope(SupervisorJob() + diskWriteDispatcher)
     private val inFlightDecodes = ConcurrentHashMap<String, InFlightDecodeEntry>()
     private val activeUiDecodeCount = AtomicInteger(0)
+    private val activeScrollCount = AtomicInteger(0)
 
     @Volatile
     private var diskCacheDir: File? = null
 
     private val missingArtworkException = NoSuchElementException("Cached missing album artwork")
+
+    fun onScrollStart() {
+        activeScrollCount.incrementAndGet()
+    }
+
+    fun onScrollStop() {
+        while (true) {
+            val current = activeScrollCount.get()
+            if (current <= 0) return
+            if (activeScrollCount.compareAndSet(current, current - 1)) return
+        }
+    }
+
+    fun isScrollingActive(): Boolean = activeScrollCount.get() > 0
 
     fun bucketSizeFor(sizePx: Int): Int = when {
         sizePx <= 160 -> 144
@@ -154,14 +176,22 @@ object ArtworkCacheManager {
         fallbackUri: String? = null,
         fallbackPath: String? = null,
         hasEmbeddedBytes: Boolean = false,
-        precomputedIdentity: String? = null
+        precomputedIdentity: String? = null,
+        sizePx: Int = 144
     ): Boolean {
         if (hasEmbeddedBytes) return false
         val identity = precomputedIdentity ?: buildSourceIdentity(primaryUri, fallbackUri, fallbackPath)
         if (identity.isEmpty()) return true
         if (missingArtworkUris.contains(identity)) return true
-        if (fallbackUri.isNullOrBlank() && fallbackPath.isNullOrBlank() && !primaryUri.isNullOrBlank()) {
-            return missingArtworkUris.contains(primaryUri)
+        if (!primaryUri.isNullOrBlank()) {
+            if (fallbackUri.isNullOrBlank() && fallbackPath.isNullOrBlank() && missingArtworkUris.contains(primaryUri)) {
+                return true
+            }
+            // For list/grid thumbnails (<= 256px), if this album's primary URI AND track fallback were already
+            // checked and confirmed to have no artwork anywhere, skip launching per-song coroutines/MediaMetadataRetriever
+            if (sizePx <= 256 && missingAlbumFallbackUris.contains(primaryUri)) {
+                return true
+            }
         }
         return false
     }
@@ -182,6 +212,7 @@ object ArtworkCacheManager {
             verifiedArtworkUris.add(uriString)
             missingArtworkUris.remove(uriString)
             missingPrimaryOnlyUris.remove(uriString)
+            missingAlbumFallbackUris.remove(uriString)
         }
     }
 
@@ -216,6 +247,22 @@ object ArtworkCacheManager {
     }
 
     /**
+     * Zero-allocation fast lookup for exact bucket hits during 120Hz scrolling.
+     */
+    fun getFastExactBitmap(
+        precomputedPrimaryCacheKey: String?,
+        precomputedCacheKey: String?
+    ): ImageBitmap? {
+        if (!precomputedPrimaryCacheKey.isNullOrEmpty()) {
+            fastReadCache[precomputedPrimaryCacheKey]?.let { return it }
+        }
+        if (!precomputedCacheKey.isNullOrEmpty() && precomputedCacheKey != precomputedPrimaryCacheKey) {
+            fastReadCache[precomputedCacheKey]?.let { return it }
+        }
+        return null
+    }
+
+    /**
      * Looks up the exact bucket size in the lock-free cache first, or falls back to any already-cached
      * bucket size (e.g. 256px or 144px thumbnail) so Now Playing (`512px`) or Album cards can display
      * an instant preview on frame 1 while the target bucket decode finishes in the background.
@@ -226,8 +273,17 @@ object ArtworkCacheManager {
         fallbackPath: String? = null,
         sizePx: Int,
         precomputedIdentity: String? = null,
-        precomputedCacheKey: String? = null
+        precomputedCacheKey: String? = null,
+        precomputedPrimaryCacheKey: String? = null
     ): Pair<ImageBitmap?, Boolean> {
+        // 0. Zero-allocation fast path using precomputed keys
+        getFastExactBitmap(precomputedPrimaryCacheKey, precomputedCacheKey)?.let {
+            return it to true
+        }
+        if (fastReadCache.isEmpty()) {
+            return null to false
+        }
+
         val identity = precomputedIdentity ?: buildSourceIdentity(primaryUri, fallbackUri, fallbackPath)
         if (identity.isNotEmpty() && missingArtworkUris.contains(identity)) {
             return null to false
@@ -242,7 +298,8 @@ object ArtworkCacheManager {
             fastReadCache[exactKey]?.let { return it to true }
         }
         if (!primaryUri.isNullOrBlank() && primaryUri != identity) {
-            fastReadCache["${targetBucket}_$primaryUri"]?.let { cached ->
+            val pKey = precomputedPrimaryCacheKey?.takeIf { it.isNotEmpty() } ?: "${targetBucket}_$primaryUri"
+            fastReadCache[pKey]?.let { cached ->
                 if (exactKey.isNotEmpty()) {
                     fastReadCache[exactKey] = cached
                 }
@@ -258,16 +315,15 @@ object ArtworkCacheManager {
             }
         }
 
-        if (fastReadCache.isEmpty()) {
+        // 2. Only Now Playing (512px) or Album (256px) needs cross-bucket preview fallback
+        if (targetBucket <= 144) {
+            if (!primaryUri.isNullOrBlank()) {
+                fastReadCache["256_$primaryUri"]?.let { return it to false }
+            }
             return null to false
         }
 
-        // 2. If requesting a larger/different size, check if another bucket is already cached
-        val fallbackBuckets = when (targetBucket) {
-            512 -> intArrayOf(256, 144)
-            256 -> intArrayOf(512, 144)
-            else -> intArrayOf(256)
-        }
+        val fallbackBuckets = if (targetBucket == 512) intArrayOf(256, 144) else intArrayOf(144, 512)
         for (bucket in fallbackBuckets) {
             if (identity.isNotEmpty()) {
                 fastReadCache["${bucket}_$identity"]?.let { return it to false }
@@ -308,11 +364,11 @@ object ArtworkCacheManager {
         isPrewarm: Boolean = false
     ): ImageBitmap? {
         val hasBytes = artworkBytes != null && artworkBytes.isNotEmpty()
+        val bucketSize = bucketSizeFor(sizePx)
         val identity = buildSourceIdentity(primaryUri, fallbackUri, fallbackPath)
         if (identity.isEmpty() && !hasBytes) return null
-        if (isSourceKnownMissing(primaryUri, fallbackUri, fallbackPath, hasBytes, identity)) return null
+        if (isSourceKnownMissing(primaryUri, fallbackUri, fallbackPath, hasBytes, identity, bucketSize)) return null
 
-        val bucketSize = bucketSizeFor(sizePx)
         val effectiveIdentity = if (identity.isNotEmpty()) {
             identity
         } else {
@@ -335,6 +391,7 @@ object ArtworkCacheManager {
         }
 
         val dispatcher = if (isPrewarm) prewarmDispatcher else uiDecodeDispatcher
+        val targetScope = if (isPrewarm) prewarmDecodeScope else uiDecodeScope
         if (!isPrewarm) {
             activeUiDecodeCount.incrementAndGet()
         }
@@ -347,7 +404,7 @@ object ArtworkCacheManager {
                         return@withContext cached
                     }
                 }
-                awaitDeduplicatedDecode(cacheKey) {
+                awaitDeduplicatedDecode(cacheKey, targetScope) {
                     decodeMultiSourceArtwork(
                         appContext = context.applicationContext,
                         primaryUri = primaryUri,
@@ -355,7 +412,8 @@ object ArtworkCacheManager {
                         fallbackPath = fallbackPath,
                         artworkBytes = artworkBytes,
                         targetSizePx = bucketSize,
-                        effectiveIdentity = effectiveIdentity
+                        effectiveIdentity = effectiveIdentity,
+                        targetScope = targetScope
                     )
                 }
             }
@@ -375,6 +433,7 @@ object ArtworkCacheManager {
      */
     private suspend fun awaitDeduplicatedDecode(
         key: String,
+        scope: CoroutineScope,
         decodeBlock: suspend () -> ImageBitmap?
     ): ImageBitmap? {
         while (true) {
@@ -384,7 +443,7 @@ object ArtworkCacheManager {
                     existing.subscribers.incrementAndGet()
                     existing
                 } else {
-                    val newDeferred = decodeScope.async {
+                    val newDeferred = scope.async {
                         try {
                             decodeBlock()
                         } finally {
@@ -403,9 +462,7 @@ object ArtworkCacheManager {
                     inFlightDecodes.remove(key, entry)
                     entry.deferred.cancel()
                 }
-                // Re-check if our own caller coroutine was cancelled (scrolled off-screen)
                 currentCoroutineContext().ensureActive()
-                // If caller is still active but the shared deferred was cancelled by another path, retry once
             } catch (_: Throwable) {
                 return null
             }
@@ -419,8 +476,8 @@ object ArtworkCacheManager {
     ) = withContext(prewarmDispatcher) {
         for (uriString in uriStrings) {
             currentCoroutineContext().ensureActive()
-            while (activeUiDecodeCount.get() > 0) {
-                delay(16L)
+            while (activeUiDecodeCount.get() > 0 || isScrollingActive()) {
+                delay(32L)
             }
             if (uriString.isBlank() || isKnownMissing(uriString)) continue
             val cacheKey = cacheKeyFor(uriString, sizePx)
@@ -446,12 +503,12 @@ object ArtworkCacheManager {
         val bucketSize = bucketSizeFor(sizePx)
         for ((primaryUri, fallbackUri, fallbackPath) in sources) {
             currentCoroutineContext().ensureActive()
-            // Yield to visible on-screen decodes during active scrolling
-            while (activeUiDecodeCount.get() > 0) {
-                delay(16L)
+            // Strictly pause background prewarming whenever the user is scrolling or a visible UI decode is running
+            while (activeUiDecodeCount.get() > 0 || isScrollingActive()) {
+                delay(32L)
             }
             val identity = buildSourceIdentity(primaryUri, fallbackUri, fallbackPath)
-            if (identity.isEmpty() || isSourceKnownMissing(primaryUri, fallbackUri, fallbackPath, false, identity)) continue
+            if (identity.isEmpty() || isSourceKnownMissing(primaryUri, fallbackUri, fallbackPath, false, identity, bucketSize)) continue
             if (getCachedBitmap("${bucketSize}_$identity") != null) continue
             if (!primaryUri.isNullOrBlank() && getCachedBitmap("${bucketSize}_$primaryUri") != null) continue
             loadOrDecodeArtwork(
@@ -474,7 +531,8 @@ object ArtworkCacheManager {
         fallbackPath: String?,
         artworkBytes: ByteArray?,
         targetSizePx: Int,
-        effectiveIdentity: String
+        effectiveIdentity: String,
+        targetScope: CoroutineScope
     ): ImageBitmap? {
         val cacheKey = "${targetSizePx}_$effectiveIdentity"
         getCachedBitmap(cacheKey)?.let { return it }
@@ -495,10 +553,9 @@ object ArtworkCacheManager {
 
         // 0. Check two-tier disk thumbnail cache first (Glide DiskCacheStrategy.RESOURCE equivalent)
         if (artworkBytes == null || artworkBytes.isEmpty()) {
-            val diskBitmap = readDiskCachedThumbnail(appContext, cacheKey)
-                ?: (if (primaryCacheKey != null && primaryCacheKey != cacheKey && !missingPrimaryOnlyUris.contains(cleanPrimary)) {
-                    readDiskCachedThumbnail(appContext, primaryCacheKey)
-                } else null)
+            val diskBitmap = (if (primaryCacheKey != null && !missingPrimaryOnlyUris.contains(cleanPrimary)) {
+                readDiskCachedThumbnail(appContext, primaryCacheKey)
+            } else null) ?: readDiskCachedThumbnail(appContext, cacheKey)
 
             if (diskBitmap != null && diskBitmap.width > 0 && diskBitmap.height > 0) {
                 try {
@@ -508,8 +565,8 @@ object ArtworkCacheManager {
                 val imageBitmap = diskBitmap.asImageBitmap()
                 putCachedBitmap(cacheKey, imageBitmap)
                 markVerified(effectiveIdentity)
-                if (cleanPrimary != null && !missingPrimaryOnlyUris.contains(cleanPrimary)) {
-                    putCachedBitmap("${targetSizePx}_$cleanPrimary", imageBitmap)
+                if (primaryCacheKey != null && cleanPrimary != null && !missingArtworkUris.contains(cleanPrimary)) {
+                    putCachedBitmap(primaryCacheKey, imageBitmap)
                     markVerified(cleanPrimary)
                 }
                 if (cleanFallback != null) {
@@ -534,7 +591,7 @@ object ArtworkCacheManager {
         if (decodedBitmap == null && cleanPrimary != null && !missingPrimaryOnlyUris.contains(cleanPrimary)) {
             currentCoroutineContext().ensureActive()
             if (cleanPrimary != cleanFallback && primaryCacheKey != null) {
-                val primaryImageBitmap = awaitDeduplicatedDecode("primary_$primaryCacheKey") {
+                val primaryImageBitmap = awaitDeduplicatedDecode("primary_$primaryCacheKey", targetScope) {
                     getCachedBitmap(primaryCacheKey)?.let { return@awaitDeduplicatedDecode it }
                     val bmp = decodeFromUriString(appContext, cleanPrimary, targetSizePx)
                     if (bmp != null && bmp.width > 0 && bmp.height > 0) {
@@ -565,19 +622,29 @@ object ArtworkCacheManager {
                 decodedBitmap = decodeFromUriString(appContext, cleanPrimary, targetSizePx)
                 if (decodedBitmap != null) {
                     decodedFromPrimary = true
+                } else {
+                    missingPrimaryOnlyUris.add(cleanPrimary)
                 }
             }
         }
 
         // 3. Try fallback audio contentUri (e.g. content://media/external/audio/media/{songId}) or file path
         //    This is the exact source Media3 / Android Notification uses when albumart/{albumId} is absent!
+        var checkedFallbackAudio = false
         if (decodedBitmap == null && cleanFallback != null && cleanFallback != cleanPrimary) {
-            currentCoroutineContext().ensureActive()
-            decodedBitmap = decodeFromAudioUriOrEmbedded(appContext, cleanFallback, cleanPath, targetSizePx)
+            // For list/grid thumbnails (<= 256px), if an earlier song from this same album already proved
+            // neither the album URI nor its audio tracks have embedded art, skip opening MediaMetadataRetriever again
+            if (targetSizePx <= 256 && cleanPrimary != null && missingAlbumFallbackUris.contains(cleanPrimary)) {
+                checkedFallbackAudio = true
+            } else {
+                currentCoroutineContext().ensureActive()
+                checkedFallbackAudio = true
+                decodedBitmap = decodeFromAudioUriOrEmbedded(appContext, cleanFallback, cleanPath, targetSizePx)
+            }
         }
 
-        // 4. If primaryUri itself was an audio URI or file path, also try embedded picture extraction
-        if (decodedBitmap == null) {
+        // 4. Only if Step 3 did NOT already inspect cleanFallback/cleanPath, try embedded picture extraction on primary/path
+        if (decodedBitmap == null && !checkedFallbackAudio) {
             currentCoroutineContext().ensureActive()
             val candidateUri = cleanFallback ?: cleanPrimary
             if (candidateUri != null || cleanPath != null) {
@@ -595,20 +662,28 @@ object ArtworkCacheManager {
             val imageBitmap = decodedBitmap.asImageBitmap()
             putCachedBitmap(cacheKey, imageBitmap)
             markVerified(effectiveIdentity)
-            if (cleanPrimary != null && (decodedFromPrimary || artworkBytes != null)) {
-                putCachedBitmap("${targetSizePx}_$cleanPrimary", imageBitmap)
+            if (cleanPrimary != null && primaryCacheKey != null &&
+                (decodedFromPrimary || artworkBytes != null || !missingArtworkUris.contains(cleanPrimary))
+            ) {
+                putCachedBitmap(primaryCacheKey, imageBitmap)
                 markVerified(cleanPrimary)
+                scheduleDiskCacheWrite(appContext, primaryCacheKey, decodedBitmap)
+            } else {
+                scheduleDiskCacheWrite(appContext, cacheKey, decodedBitmap)
             }
             if (cleanFallback != null) {
                 putCachedBitmap("${targetSizePx}_$cleanFallback", imageBitmap)
                 markVerified(cleanFallback)
             }
-            scheduleDiskCacheWrite(appContext, cacheKey, decodedBitmap)
             imageBitmap
         } else {
             markMissing(effectiveIdentity)
-            if (cleanFallback == null && cleanPath == null && cleanPrimary != null) {
-                markMissing(cleanPrimary)
+            if (cleanPrimary != null) {
+                if (cleanFallback == null && cleanPath == null) {
+                    markMissing(cleanPrimary)
+                } else {
+                    missingAlbumFallbackUris.add(cleanPrimary)
+                }
             }
             null
         }
@@ -630,7 +705,6 @@ object ArtworkCacheManager {
     }
 
     private fun diskCacheFileForKey(dir: File, key: String): File {
-        // Fast 64-bit FNV-1a hash + length suffix to avoid filename collisions and filesystem path limits
         var hash = -0x340d631b7bdddcdbL
         for (i in 0 until key.length) {
             hash = hash xor key[i].code.toLong()
@@ -689,15 +763,21 @@ object ArtworkCacheManager {
         val scheme = uri.scheme?.lowercase()
         val resolver = appContext.contentResolver
 
-        // A. On Android 10+ (API 29+), try ContentResolver.loadThumbnail first for content://media URIs
+        // A. On Android 10+ (API 29+), try ContentResolver.loadThumbnail first for content:// URIs
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && scheme == "content") {
+            var loadThumbFileNotFound = false
             try {
                 val thumb = resolver.loadThumbnail(uri, Size(targetSizePx, targetSizePx), null)
                 if (thumb.width > 0 && thumb.height > 0) {
                     return scaleDownIfOversized(thumb, targetSizePx)
                 }
+            } catch (_: java.io.FileNotFoundException) {
+                loadThumbFileNotFound = true
             } catch (_: Throwable) {
-                // Fall through to FileDescriptor / InputStream decode
+            }
+            // If MediaProvider reported FileNotFoundException on a content://media/ URI, do not make 2 more failing IPCs
+            if (loadThumbFileNotFound && uriString.startsWith("content://media/")) {
+                return null
             }
         }
 
@@ -708,6 +788,7 @@ object ArtworkCacheManager {
             if (file.exists() && file.canRead()) {
                 decodeSampledFile(file.absolutePath, targetSizePx)?.let { return it }
             }
+            return null
         }
 
         // C. Try ContentResolver.openFileDescriptor (single FD open, supports bounds + decode without reopening stream)
@@ -976,11 +1057,13 @@ object ArtworkCacheManager {
     fun clearNegativeCacheOnly() {
         missingArtworkUris.clear()
         missingPrimaryOnlyUris.clear()
+        missingAlbumFallbackUris.clear()
     }
 
     fun clear() {
         missingArtworkUris.clear()
         missingPrimaryOnlyUris.clear()
+        missingAlbumFallbackUris.clear()
         verifiedArtworkUris.clear()
         inFlightDecodes.values.forEach { it.deferred.cancel() }
         inFlightDecodes.clear()
@@ -1024,24 +1107,12 @@ object ArtworkCacheManager {
     }
 }
 
-private class ArtworkLookupDescriptor(
-    val primaryUriString: String?,
-    val fallbackUriString: String?,
-    val cleanPath: String?,
-    val bytesHash: Int,
-    val sourceIdentity: String,
-    val targetBucket: Int,
-    val cacheKey: String,
-    val initialBitmap: ImageBitmap?,
-    val needsAsyncDecode: Boolean
-)
-
 /**
  * Reusable, zero-jank album artwork composable for list rows, album grids, mini player, and hero art.
- * - Immediately renders cached [ImageBitmap] synchronously on the first composition frame with zero
- *   coroutine launch or second recomposition when already in [ArtworkCacheManager].
- * - Cancels in-flight background decoding immediately if the item scrolls off-screen during a 120Hz fling.
- * - Uses a single [MutableState] slot when async decoding is needed, and zero state writes when cached.
+ * - Immediately renders cached [ImageBitmap] or known-missing fallback synchronously on the first
+ *   composition frame with ZERO `remember`, ZERO `MutableState`, and ZERO `LaunchedEffect` allocations.
+ * - Debounces background I/O by 55ms for list/grid thumbnails (`sizePx <= 256`) so items flung past
+ *   the viewport during 120Hz scrolling cancel before starting any ContentResolver IPC or MediaMetadataRetriever work.
  */
 @Composable
 fun FastArtworkImage(
@@ -1055,93 +1126,155 @@ fun FastArtworkImage(
     artworkBytes: ByteArray? = null,
     precomputedIdentity: String? = null,
     precomputedCacheKey: String? = null,
+    precomputedPrimaryCacheKey: String? = null,
+    imageClipShape: Shape? = null,
     contentScale: ContentScale = ContentScale.Crop,
     fallback: @Composable () -> Unit
 ) {
-    val descriptor = remember(
-        artworkUri,
-        fallbackUri,
-        fallbackPath,
-        sizePx,
-        artworkBytes,
-        precomputedIdentity,
-        precomputedCacheKey
-    ) {
-        val primaryStr = when (artworkUri) {
-            null -> null
-            is String -> artworkUri.takeIf { it.isNotBlank() }
-            else -> artworkUri.toString().takeIf { it.isNotBlank() }
-        }
-        val fallbackStr = when (fallbackUri) {
-            null -> null
-            is String -> fallbackUri.takeIf { it.isNotBlank() }
-            else -> fallbackUri.toString().takeIf { it.isNotBlank() }
-        }
-        val pathStr = fallbackPath?.takeIf { it.isNotBlank() }
-        val bHash = if (artworkBytes != null && artworkBytes.isNotEmpty()) artworkBytes.contentHashCode() else 0
-        val baseIdentity = precomputedIdentity?.takeIf { it.isNotEmpty() }
-            ?: ArtworkCacheManager.buildSourceIdentity(primaryStr, fallbackStr, pathStr)
-        val identity = if (baseIdentity.isNotEmpty()) baseIdentity else if (bHash != 0) "bytes_$bHash" else ""
-        val bucket = ArtworkCacheManager.bucketSizeFor(sizePx)
-        val key = if (bHash == 0 && !precomputedCacheKey.isNullOrEmpty()) {
-            precomputedCacheKey
-        } else if (identity.isEmpty()) {
-            ""
-        } else {
-            "${bucket}_$identity"
+    val hasBytes = artworkBytes != null && artworkBytes.isNotEmpty()
+    val bucket = ArtworkCacheManager.bucketSizeFor(sizePx)
+
+    // 1. Ultra-fast zero-allocation synchronous check for precomputed list/grid items
+    if (!hasBytes && (!precomputedPrimaryCacheKey.isNullOrEmpty() || !precomputedCacheKey.isNullOrEmpty())) {
+        val exactCached = ArtworkCacheManager.getFastExactBitmap(precomputedPrimaryCacheKey, precomputedCacheKey)
+        if (exactCached != null) {
+            Box(
+                modifier = modifier,
+                contentAlignment = Alignment.Center
+            ) {
+                val imgModifier = if (imageClipShape != null) {
+                    Modifier.fillMaxSize().clip(imageClipShape)
+                } else {
+                    Modifier.fillMaxSize()
+                }
+                Image(
+                    bitmap = exactCached,
+                    contentDescription = contentDescription,
+                    modifier = imgModifier,
+                    contentScale = contentScale,
+                    filterQuality = FilterQuality.Low
+                )
+            }
+            return
         }
 
-        val missing = ArtworkCacheManager.isSourceKnownMissing(
+        val primaryStr = artworkUri as? String
+        val fallbackStr = fallbackUri as? String
+        if (ArtworkCacheManager.isSourceKnownMissing(
+                primaryUri = primaryStr,
+                fallbackUri = fallbackStr,
+                fallbackPath = fallbackPath,
+                hasEmbeddedBytes = false,
+                precomputedIdentity = precomputedIdentity,
+                sizePx = bucket
+            )
+        ) {
+            Box(
+                modifier = modifier,
+                contentAlignment = Alignment.Center
+            ) {
+                fallback()
+            }
+            return
+        }
+    }
+
+    // 2. General lookup for uncached items or Now Playing hero art
+    val primaryStr = when (artworkUri) {
+        null -> null
+        is String -> artworkUri.takeIf { it.isNotBlank() }
+        else -> artworkUri.toString().takeIf { it.isNotBlank() }
+    }
+    val fallbackStr = when (fallbackUri) {
+        null -> null
+        is String -> fallbackUri.takeIf { it.isNotBlank() }
+        else -> fallbackUri.toString().takeIf { it.isNotBlank() }
+    }
+    val pathStr = fallbackPath?.takeIf { it.isNotBlank() }
+    val bHash = if (hasBytes) artworkBytes.contentHashCode() else 0
+    val baseIdentity = precomputedIdentity?.takeIf { it.isNotEmpty() }
+        ?: ArtworkCacheManager.buildSourceIdentity(primaryStr, fallbackStr, pathStr)
+    val identity = if (baseIdentity.isNotEmpty()) baseIdentity else if (bHash != 0) "bytes_$bHash" else ""
+    val key = if (bHash == 0 && !precomputedCacheKey.isNullOrEmpty()) {
+        precomputedCacheKey
+    } else if (identity.isEmpty()) {
+        ""
+    } else {
+        "${bucket}_$identity"
+    }
+
+    val missing = ArtworkCacheManager.isSourceKnownMissing(
+        primaryUri = primaryStr,
+        fallbackUri = fallbackStr,
+        fallbackPath = pathStr,
+        hasEmbeddedBytes = hasBytes,
+        precomputedIdentity = identity,
+        sizePx = bucket
+    )
+
+    val (initialBitmap, isExact) = if (key.isEmpty() || missing) {
+        null to false
+    } else {
+        ArtworkCacheManager.getBestAvailableBitmap(
             primaryUri = primaryStr,
             fallbackUri = fallbackStr,
             fallbackPath = pathStr,
-            hasEmbeddedBytes = bHash != 0,
-            precomputedIdentity = identity
-        )
-        val (bmp, exact) = if (key.isEmpty() || missing) {
-            null to false
-        } else {
-            ArtworkCacheManager.getBestAvailableBitmap(
-                primaryUri = primaryStr,
-                fallbackUri = fallbackStr,
-                fallbackPath = pathStr,
-                sizePx = bucket,
-                precomputedIdentity = identity,
-                precomputedCacheKey = key
-            )
-        }
-        ArtworkLookupDescriptor(
-            primaryUriString = primaryStr,
-            fallbackUriString = fallbackStr,
-            cleanPath = pathStr,
-            bytesHash = bHash,
-            sourceIdentity = identity,
-            targetBucket = bucket,
-            cacheKey = key,
-            initialBitmap = bmp,
-            needsAsyncDecode = !exact && !missing && identity.isNotEmpty()
+            sizePx = bucket,
+            precomputedIdentity = identity,
+            precomputedCacheKey = key,
+            precomputedPrimaryCacheKey = precomputedPrimaryCacheKey
         )
     }
 
-    var asyncBitmap by remember(descriptor.cacheKey, descriptor.bytesHash) {
-        mutableStateOf(descriptor.initialBitmap)
-    }
+    val needsAsyncDecode = !isExact && !missing && identity.isNotEmpty()
 
-    if (descriptor.needsAsyncDecode) {
-        val context = LocalContext.current
-        LaunchedEffect(descriptor.cacheKey, descriptor.bytesHash) {
-            val decoded = ArtworkCacheManager.loadOrDecodeArtwork(
-                context = context,
-                primaryUri = descriptor.primaryUriString,
-                fallbackUri = descriptor.fallbackUriString,
-                fallbackPath = descriptor.cleanPath,
-                artworkBytes = artworkBytes,
-                sizePx = descriptor.targetBucket,
-                isPrewarm = false
-            )
-            if (decoded != null && asyncBitmap !== decoded) {
-                asyncBitmap = decoded
+    if (!needsAsyncDecode) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            if (initialBitmap != null) {
+                val imgModifier = if (imageClipShape != null) {
+                    Modifier.fillMaxSize().clip(imageClipShape)
+                } else {
+                    Modifier.fillMaxSize()
+                }
+                Image(
+                    bitmap = initialBitmap,
+                    contentDescription = contentDescription,
+                    modifier = imgModifier,
+                    contentScale = contentScale,
+                    filterQuality = FilterQuality.Low
+                )
+            } else {
+                fallback()
             }
+        }
+        return
+    }
+
+    var asyncBitmap by remember(key, bHash) {
+        mutableStateOf(initialBitmap)
+    }
+
+    val context = LocalContext.current
+    LaunchedEffect(key, bHash) {
+        // For list/grid thumbnails (<= 256px), wait 55ms before touching ContentResolver/disk I/O.
+        // During a 120Hz fling, items fly past in < 45ms and cancel here with ZERO I/O or recomposition!
+        if (bucket <= 256) {
+            delay(55L)
+        }
+        val decoded = ArtworkCacheManager.loadOrDecodeArtwork(
+            context = context,
+            primaryUri = primaryStr,
+            fallbackUri = fallbackStr,
+            fallbackPath = pathStr,
+            artworkBytes = artworkBytes,
+            sizePx = bucket,
+            isPrewarm = false
+        )
+        if (decoded != null && asyncBitmap !== decoded) {
+            asyncBitmap = decoded
         }
     }
 
@@ -1149,12 +1282,17 @@ fun FastArtworkImage(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        val bitmap = if (descriptor.needsAsyncDecode) asyncBitmap else descriptor.initialBitmap
+        val bitmap = asyncBitmap
         if (bitmap != null) {
+            val imgModifier = if (imageClipShape != null) {
+                Modifier.fillMaxSize().clip(imageClipShape)
+            } else {
+                Modifier.fillMaxSize()
+            }
             Image(
                 bitmap = bitmap,
                 contentDescription = contentDescription,
-                modifier = Modifier.fillMaxSize(),
+                modifier = imgModifier,
                 contentScale = contentScale,
                 filterQuality = FilterQuality.Low
             )
@@ -1165,39 +1303,61 @@ fun FastArtworkImage(
 }
 
 /**
- * Viewport-aware lookahead artwork preloader for [LazyListState] (Compose equivalent of
- * Glide's `RecyclerViewPreloader`). Preloads upcoming song thumbnails ahead of the scroll
- * viewport on a low-priority background dispatcher without competing with active on-screen decodes.
+ * Scroll-idle lookahead artwork preloader for [LazyListState].
+ * - Reports active scroll state to [ArtworkCacheManager] so background jobs yield during 120Hz flings.
+ * - Never executes work on the Main Thread during active scrolling; only prewarms upcoming items
+ *   on `Dispatchers.Default` / `prewarmDispatcher` after scrolling settles.
  */
 @Composable
 fun LazyListSongArtworkPreloader(
     listState: LazyListState,
     songs: List<Song>,
-    preloadAheadCount: Int = 12,
+    preloadAheadCount: Int = 10,
     headerItemCount: Int = 1
 ) {
+    val isScrolling = listState.isScrollInProgress
+    DisposableEffect(isScrolling) {
+        if (isScrolling) {
+            ArtworkCacheManager.onScrollStart()
+        }
+        onDispose {
+            if (isScrolling) {
+                ArtworkCacheManager.onScrollStop()
+            }
+        }
+    }
+
     if (songs.isEmpty()) return
     val context = LocalContext.current
     LaunchedEffect(listState, songs) {
-        snapshotFlow { listState.firstVisibleItemIndex }
+        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
             .distinctUntilChanged()
-            .collect { firstVisible ->
-                val startSongIndex = (firstVisible - headerItemCount).coerceAtLeast(0)
-                val endSongIndex = (startSongIndex + preloadAheadCount + 6).coerceAtMost(songs.size)
-                if (startSongIndex >= endSongIndex) return@collect
-                val slice = ArrayList<Triple<String?, String?, String?>>(endSongIndex - startSongIndex)
-                for (i in startSongIndex until endSongIndex) {
-                    val s = songs[i]
-                    if (ArtworkCacheManager.getCachedBitmap(s.thumbCacheKey) == null &&
-                        !ArtworkCacheManager.isSourceKnownMissing(
-                            primaryUri = s.albumArtUriString,
-                            fallbackUri = s.contentUriString,
-                            fallbackPath = s.path,
-                            precomputedIdentity = s.artworkSourceIdentity
-                        )
-                    ) {
-                        slice.add(Triple(s.albumArtUriString, s.contentUriString, s.path))
+            .collectLatest { (scrolling, firstVisible) ->
+                if (scrolling) return@collectLatest
+                delay(80L)
+                val slice = withContext(Dispatchers.Default) {
+                    val startSongIndex = (firstVisible - headerItemCount).coerceAtLeast(0)
+                    val endSongIndex = (startSongIndex + preloadAheadCount + 6).coerceAtMost(songs.size)
+                    if (startSongIndex >= endSongIndex) return@withContext emptyList()
+                    val seenPrimary = HashSet<String>(endSongIndex - startSongIndex)
+                    val list = ArrayList<Triple<String?, String?, String?>>(endSongIndex - startSongIndex)
+                    for (i in startSongIndex until endSongIndex) {
+                        val s = songs[i]
+                        val dedupKey = s.albumArtUriString ?: s.contentUriString
+                        if (!seenPrimary.add(dedupKey)) continue
+                        if (ArtworkCacheManager.getFastExactBitmap(s.primaryThumbCacheKey, s.thumbCacheKey) == null &&
+                            !ArtworkCacheManager.isSourceKnownMissing(
+                                primaryUri = s.albumArtUriString,
+                                fallbackUri = s.contentUriString,
+                                fallbackPath = s.path,
+                                precomputedIdentity = s.artworkSourceIdentity,
+                                sizePx = 144
+                            )
+                        ) {
+                            list.add(Triple(s.albumArtUriString, s.contentUriString, s.path))
+                        }
                     }
+                    list
                 }
                 if (slice.isNotEmpty()) {
                     ArtworkCacheManager.prewarmArtworkSources(
@@ -1211,36 +1371,54 @@ fun LazyListSongArtworkPreloader(
 }
 
 /**
- * Viewport-aware lookahead artwork preloader for [LazyGridState] album grids.
+ * Scroll-idle lookahead artwork preloader for [LazyGridState] album grids.
  */
 @Composable
 fun LazyGridAlbumArtworkPreloader(
     gridState: LazyGridState,
     albums: List<Album>,
-    preloadAheadCount: Int = 10
+    preloadAheadCount: Int = 8
 ) {
+    val isScrolling = gridState.isScrollInProgress
+    DisposableEffect(isScrolling) {
+        if (isScrolling) {
+            ArtworkCacheManager.onScrollStart()
+        }
+        onDispose {
+            if (isScrolling) {
+                ArtworkCacheManager.onScrollStop()
+            }
+        }
+    }
+
     if (albums.isEmpty()) return
     val context = LocalContext.current
     LaunchedEffect(gridState, albums) {
-        snapshotFlow { gridState.firstVisibleItemIndex }
+        snapshotFlow { gridState.isScrollInProgress to gridState.firstVisibleItemIndex }
             .distinctUntilChanged()
-            .collect { firstVisible ->
-                val startIdx = firstVisible.coerceAtLeast(0)
-                val endIdx = (startIdx + preloadAheadCount + 6).coerceAtMost(albums.size)
-                if (startIdx >= endIdx) return@collect
-                val slice = ArrayList<Triple<String?, String?, String?>>(endIdx - startIdx)
-                for (i in startIdx until endIdx) {
-                    val a = albums[i]
-                    if (ArtworkCacheManager.getCachedBitmap(a.albumCacheKey) == null &&
-                        !ArtworkCacheManager.isSourceKnownMissing(
-                            primaryUri = a.artworkUriString,
-                            fallbackUri = a.fallbackAudioUriString,
-                            fallbackPath = a.fallbackAudioPath,
-                            precomputedIdentity = a.artworkSourceIdentity
-                        )
-                    ) {
-                        slice.add(Triple(a.artworkUriString, a.fallbackAudioUriString, a.fallbackAudioPath))
+            .collectLatest { (scrolling, firstVisible) ->
+                if (scrolling) return@collectLatest
+                delay(80L)
+                val slice = withContext(Dispatchers.Default) {
+                    val startIdx = firstVisible.coerceAtLeast(0)
+                    val endIdx = (startIdx + preloadAheadCount + 4).coerceAtMost(albums.size)
+                    if (startIdx >= endIdx) return@withContext emptyList()
+                    val list = ArrayList<Triple<String?, String?, String?>>(endIdx - startIdx)
+                    for (i in startIdx until endIdx) {
+                        val a = albums[i]
+                        if (ArtworkCacheManager.getFastExactBitmap(a.primaryAlbumCacheKey, a.albumCacheKey) == null &&
+                            !ArtworkCacheManager.isSourceKnownMissing(
+                                primaryUri = a.artworkUriString,
+                                fallbackUri = a.fallbackAudioUriString,
+                                fallbackPath = a.fallbackAudioPath,
+                                precomputedIdentity = a.artworkSourceIdentity,
+                                sizePx = 256
+                            )
+                        ) {
+                            list.add(Triple(a.artworkUriString, a.fallbackAudioUriString, a.fallbackAudioPath))
+                        }
                     }
+                    list
                 }
                 if (slice.isNotEmpty()) {
                     ArtworkCacheManager.prewarmArtworkSources(

@@ -168,31 +168,14 @@ fun ScannedAudioListScreen(
         }
     }
 
-    Scaffold(
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .testTag("scanned_audio_list_screen"),
-        floatingActionButton = {
-            if (filteredAndSortedSongs.isNotEmpty()) {
-                FloatingActionButton(
-                    onClick = { onShuffleAll(filteredAndSortedSongs) },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = CircleShape,
-                    modifier = Modifier.testTag("fab_shuffle_scanned")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Shuffle,
-                        contentDescription = "Shuffle All Scanned Tracks"
-                    )
-                }
-            }
-        }
-    ) { paddingValues ->
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("scanned_audio_list_screen")
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
+            modifier = Modifier.fillMaxSize()
         ) {
             // Top Bar & Rescan Header
             Row(
@@ -382,6 +365,24 @@ fun ScannedAudioListScreen(
                 }
             }
         }
+
+        if (filteredAndSortedSongs.isNotEmpty()) {
+            FloatingActionButton(
+                onClick = { onShuffleAll(filteredAndSortedSongs) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = CircleShape,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .testTag("fab_shuffle_scanned")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Shuffle,
+                    contentDescription = "Shuffle All Scanned Tracks"
+                )
+            }
+        }
     }
 }
 
@@ -403,6 +404,7 @@ private fun ScannedAudioItemRow(
     var menuOpen by remember { mutableStateOf(false) }
     val handleSongClick = remember(song, onSongClick) { { onSongClick(song) } }
     val handleToggleFavorite = remember(song.id, onToggleFavorite) { { onToggleFavorite(song.id) } }
+    val handleOpenMenu = remember { { menuOpen = true } }
 
     val colorScheme = MaterialTheme.colorScheme
     val rowBgColor = if (isPlaying) {
@@ -430,10 +432,11 @@ private fun ScannedAudioItemRow(
             fallbackPath = song.path,
             precomputedIdentity = song.artworkSourceIdentity,
             precomputedCacheKey = song.thumbCacheKey,
+            precomputedPrimaryCacheKey = song.primaryThumbCacheKey,
+            imageClipShape = ScannedThumbShape,
             modifier = Modifier
                 .size(50.dp)
                 .background(colorScheme.surfaceVariant, ScannedThumbShape)
-                .clip(ScannedThumbShape)
         ) {
             Icon(
                 imageVector = Icons.Default.Audiotrack,
@@ -474,9 +477,11 @@ private fun ScannedAudioItemRow(
         }
 
         // Favorite Button
-        IconButton(
+        com.example.ui.components.FastIconActionButton(
             onClick = handleToggleFavorite,
-            modifier = Modifier.testTag("scanned_audio_fav_${song.id}")
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("scanned_audio_fav_${song.id}")
         ) {
             Icon(
                 imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -487,9 +492,11 @@ private fun ScannedAudioItemRow(
 
         // Overflow Options Menu (only compose DropdownMenu popup when open)
         Box {
-            IconButton(
-                onClick = { menuOpen = true },
-                modifier = Modifier.testTag("scanned_audio_menu_${song.id}")
+            com.example.ui.components.FastIconActionButton(
+                onClick = handleOpenMenu,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("scanned_audio_menu_${song.id}")
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,

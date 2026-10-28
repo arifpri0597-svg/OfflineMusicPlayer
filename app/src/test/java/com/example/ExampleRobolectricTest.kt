@@ -331,6 +331,30 @@ class ExampleRobolectricTest {
             )
             org.junit.Assert.assertNotNull("Expected clearNegativeCacheOnly() to preserve decoded ImageBitmap in memory", preservedThumb.first)
             assertEquals(0, com.example.ui.components.ArtworkCacheManager.activeInFlightDecodeCount())
+
+            // 5. Verify album-level negative cache deduplication across tracks sharing the same missing album URI:
+            // When track 1 in an album with no albumart and no embedded artwork fails decoding,
+            // track 2 sharing that albumArtUri must immediately return true from isSourceKnownMissing at 144px
+            val sharedMissingAlbumUri = "content://media/external/audio/albumart/404404"
+            val track1Null = com.example.ui.components.ArtworkCacheManager.loadOrDecodeArtwork(
+                context = appContext,
+                primaryUri = sharedMissingAlbumUri,
+                fallbackUri = "content://media/external/audio/media/90001",
+                fallbackPath = "/nonexistent/track1.mp3",
+                artworkBytes = null,
+                sizePx = 144
+            )
+            org.junit.Assert.assertNull(track1Null)
+            assertTrue(
+                "Subsequent tracks in the same missing-art album must immediately hit negative cache at 144px without I/O",
+                com.example.ui.components.ArtworkCacheManager.isSourceKnownMissing(
+                    primaryUri = sharedMissingAlbumUri,
+                    fallbackUri = "content://media/external/audio/media/90002",
+                    fallbackPath = "/nonexistent/track2.mp3",
+                    hasEmbeddedBytes = false,
+                    sizePx = 144
+                )
+            )
         }
         fallbackFile.delete()
         com.example.ui.components.ArtworkCacheManager.clear()

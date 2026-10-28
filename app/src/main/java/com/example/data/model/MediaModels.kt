@@ -26,6 +26,7 @@ data class Album(
         else -> ""
     }
     val albumCacheKey: String = if (artworkSourceIdentity.isNotEmpty()) "256_$artworkSourceIdentity" else ""
+    val primaryAlbumCacheKey: String = if (artworkUriString != null) "256_$artworkUriString" else albumCacheKey
     val tracksSubtitle: String = "$artist • $songCount tracks"
     val songCountLabel: String = "$songCount songs"
 }

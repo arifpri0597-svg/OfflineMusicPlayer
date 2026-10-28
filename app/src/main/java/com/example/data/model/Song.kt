@@ -34,6 +34,9 @@ data class Song(
         contentUriString
     }
     val thumbCacheKey: String = "144_$artworkSourceIdentity"
+    val primaryThumbCacheKey: String = if (albumArtUriString != null) "144_$albumArtUriString" else thumbCacheKey
+    val homeFavKey: String = "fav_$id"
+    val homeAllKey: String = "all_$id"
 
 
     companion object {

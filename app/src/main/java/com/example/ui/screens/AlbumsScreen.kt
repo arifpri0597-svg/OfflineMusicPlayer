@@ -128,6 +128,7 @@ fun AlbumsScreen(
                             fallbackPath = selectedAlbum.fallbackAudioPath,
                             precomputedIdentity = selectedAlbum.artworkSourceIdentity,
                             precomputedCacheKey = selectedAlbum.albumCacheKey,
+                            precomputedPrimaryCacheKey = selectedAlbum.primaryAlbumCacheKey,
                             modifier = Modifier
                                 .size(110.dp)
                                 .clip(RoundedCornerShape(16.dp))

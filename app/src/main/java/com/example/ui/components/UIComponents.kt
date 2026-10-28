@@ -102,6 +102,23 @@ private val FolderIconBrush = Brush.linearGradient(
 )
 
 @Composable
+fun FastIconActionButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier.clickable(
+            onClick = onClick,
+            role = androidx.compose.ui.semantics.Role.Button
+        ),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+@Composable
 fun SongItemRow(
     song: Song,
     isPlaying: Boolean,
@@ -113,38 +130,10 @@ fun SongItemRow(
     onAddToPlaylist: (Song) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
     val handleSongClick = remember(song, onSongClick) { { onSongClick(song) } }
     val handleToggleFavorite = remember(song.id, onToggleFavorite) { { onToggleFavorite(song.id) } }
-    val handlePlayNext = remember(song, onPlayNext) { { onPlayNext(song) } }
-    val handleAddToQueue = remember(song, onAddToQueue) { { onAddToQueue(song) } }
-    val handleAddToPlaylist = remember(song, onAddToPlaylist) { { onAddToPlaylist(song) } }
-
-    SongItemRow(
-        song = song,
-        isPlaying = isPlaying,
-        isFavorite = isFavorite,
-        onSongClick = handleSongClick,
-        onToggleFavorite = handleToggleFavorite,
-        onPlayNext = handlePlayNext,
-        onAddToQueue = handleAddToQueue,
-        onAddToPlaylist = handleAddToPlaylist,
-        modifier = modifier
-    )
-}
-
-@Composable
-fun SongItemRow(
-    song: Song,
-    isPlaying: Boolean,
-    isFavorite: Boolean,
-    onSongClick: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
-    onAddToPlaylist: () -> Unit = {},
-    modifier: Modifier = Modifier
-) {
-    var menuExpanded by remember { mutableStateOf(false) }
+    val handleOpenMenu = remember { { menuExpanded = true } }
     val colorScheme = MaterialTheme.colorScheme
 
     val cardBgColor = if (isPlaying) {
@@ -165,8 +154,7 @@ fun SongItemRow(
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .background(color = cardBgColor, shape = SongRowShape)
             .border(width = 1.dp, color = borderColor, shape = SongRowShape)
-            .clip(SongRowShape)
-            .clickable(onClick = onSongClick)
+            .clickable(onClick = handleSongClick)
             .testTag("song_item_${song.id}")
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -175,8 +163,7 @@ fun SongItemRow(
         Box(
             modifier = Modifier
                 .size(52.dp)
-                .background(SongThumbBrush, SongThumbShape)
-                .clip(SongThumbShape),
+                .background(SongThumbBrush, SongThumbShape),
             contentAlignment = Alignment.Center
         ) {
             FastArtworkImage(
@@ -188,6 +175,8 @@ fun SongItemRow(
                 fallbackPath = song.path,
                 precomputedIdentity = song.artworkSourceIdentity,
                 precomputedCacheKey = song.thumbCacheKey,
+                precomputedPrimaryCacheKey = song.primaryThumbCacheKey,
+                imageClipShape = SongThumbShape,
                 modifier = Modifier.fillMaxSize()
             ) {
                 Icon(
@@ -202,7 +191,7 @@ fun SongItemRow(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(PlayingOverlayColor),
+                        .background(PlayingOverlayColor, SongThumbShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -239,10 +228,10 @@ fun SongItemRow(
             )
         }
 
-        // Favorite Button
+        // Favorite Button (FastIconActionButton avoids Material3 IconButton clip & CompositionLocal overhead)
         val favColor = if (isFavorite) NeonPink else colorScheme.onSurfaceVariant
-        IconButton(
-            onClick = onToggleFavorite,
+        FastIconActionButton(
+            onClick = handleToggleFavorite,
             modifier = Modifier
                 .size(40.dp)
                 .testTag("fav_btn_${song.id}")
@@ -257,8 +246,8 @@ fun SongItemRow(
 
         // More Options Menu (only compose DropdownMenu popup when expanded)
         Box {
-            IconButton(
-                onClick = { menuExpanded = true },
+            FastIconActionButton(
+                onClick = handleOpenMenu,
                 modifier = Modifier
                     .size(40.dp)
                     .testTag("more_btn_${song.id}")
@@ -280,7 +269,7 @@ fun SongItemRow(
                         leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonPink) },
                         onClick = {
                             menuExpanded = false
-                            onPlayNext()
+                            onPlayNext(song)
                         }
                     )
                     DropdownMenuItem(
@@ -288,7 +277,7 @@ fun SongItemRow(
                         leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPurple) },
                         onClick = {
                             menuExpanded = false
-                            onAddToQueue()
+                            onAddToQueue(song)
                         }
                     )
                     DropdownMenuItem(
@@ -296,7 +285,7 @@ fun SongItemRow(
                         leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = NeonPink) },
                         onClick = {
                             menuExpanded = false
-                            onAddToPlaylist()
+                            onAddToPlaylist(song)
                         }
                     )
                 }
@@ -306,15 +295,26 @@ fun SongItemRow(
 }
 
 @Composable
-fun AlbumCard(
-    album: Album,
-    onAlbumClick: (Album) -> Unit,
+fun SongItemRow(
+    song: Song,
+    isPlaying: Boolean,
+    isFavorite: Boolean,
+    onSongClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onAddToPlaylist: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val handleClick = remember(album, onAlbumClick) { { onAlbumClick(album) } }
-    AlbumCard(
-        album = album,
-        onClick = handleClick,
+    SongItemRow(
+        song = song,
+        isPlaying = isPlaying,
+        isFavorite = isFavorite,
+        onSongClick = { _ -> onSongClick() },
+        onToggleFavorite = { _ -> onToggleFavorite() },
+        onPlayNext = { _ -> onPlayNext() },
+        onAddToQueue = { _ -> onAddToQueue() },
+        onAddToPlaylist = { _ -> onAddToPlaylist() },
         modifier = modifier
     )
 }
@@ -322,9 +322,10 @@ fun AlbumCard(
 @Composable
 fun AlbumCard(
     album: Album,
-    onClick: () -> Unit,
+    onAlbumClick: (Album) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val handleClick = remember(album, onAlbumClick) { { onAlbumClick(album) } }
     val colorScheme = MaterialTheme.colorScheme
     val containerColor = colorScheme.surfaceVariant.copy(alpha = 0.55f)
     val borderColor = colorScheme.outline.copy(alpha = 0.3f)
@@ -335,7 +336,7 @@ fun AlbumCard(
             .background(color = containerColor, shape = AlbumCardShape)
             .border(width = 1.dp, color = borderColor, shape = AlbumCardShape)
             .clip(AlbumCardShape)
-            .clickable(onClick = onClick)
+            .clickable(onClick = handleClick)
             .testTag("album_card_${album.id}")
     ) {
         FastArtworkImage(
@@ -347,6 +348,7 @@ fun AlbumCard(
             fallbackPath = album.fallbackAudioPath,
             precomputedIdentity = album.artworkSourceIdentity,
             precomputedCacheKey = album.albumCacheKey,
+            precomputedPrimaryCacheKey = album.primaryAlbumCacheKey,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
@@ -381,15 +383,14 @@ fun AlbumCard(
 }
 
 @Composable
-fun ArtistItemRow(
-    artist: Artist,
-    onArtistClick: (Artist) -> Unit,
+fun AlbumCard(
+    album: Album,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val handleClick = remember(artist, onArtistClick) { { onArtistClick(artist) } }
-    ArtistItemRow(
-        artist = artist,
-        onClick = handleClick,
+    AlbumCard(
+        album = album,
+        onAlbumClick = { _ -> onClick() },
         modifier = modifier
     )
 }
@@ -397,9 +398,10 @@ fun ArtistItemRow(
 @Composable
 fun ArtistItemRow(
     artist: Artist,
-    onClick: () -> Unit,
+    onArtistClick: (Artist) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val handleClick = remember(artist, onArtistClick) { { onArtistClick(artist) } }
     val colorScheme = MaterialTheme.colorScheme
     val bgColor = colorScheme.surfaceVariant.copy(alpha = 0.45f)
     val borderColor = colorScheme.outline.copy(alpha = 0.25f)
@@ -409,8 +411,7 @@ fun ArtistItemRow(
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .background(color = bgColor, shape = SongRowShape)
             .border(width = 1.dp, color = borderColor, shape = SongRowShape)
-            .clip(SongRowShape)
-            .clickable(onClick = onClick)
+            .clickable(onClick = handleClick)
             .testTag("artist_item_${artist.name}")
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -446,15 +447,14 @@ fun ArtistItemRow(
 }
 
 @Composable
-fun FolderItemRow(
-    folder: Folder,
-    onFolderClick: (Folder) -> Unit,
+fun ArtistItemRow(
+    artist: Artist,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val handleClick = remember(folder, onFolderClick) { { onFolderClick(folder) } }
-    FolderItemRow(
-        folder = folder,
-        onClick = handleClick,
+    ArtistItemRow(
+        artist = artist,
+        onArtistClick = { _ -> onClick() },
         modifier = modifier
     )
 }
@@ -462,9 +462,10 @@ fun FolderItemRow(
 @Composable
 fun FolderItemRow(
     folder: Folder,
-    onClick: () -> Unit,
+    onFolderClick: (Folder) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val handleClick = remember(folder, onFolderClick) { { onFolderClick(folder) } }
     val colorScheme = MaterialTheme.colorScheme
     val bgColor = colorScheme.surfaceVariant.copy(alpha = 0.45f)
     val borderColor = colorScheme.outline.copy(alpha = 0.25f)
@@ -474,8 +475,7 @@ fun FolderItemRow(
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .background(color = bgColor, shape = SongRowShape)
             .border(width = 1.dp, color = borderColor, shape = SongRowShape)
-            .clip(SongRowShape)
-            .clickable(onClick = onClick)
+            .clickable(onClick = handleClick)
             .testTag("folder_item_${folder.name}")
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -508,6 +508,19 @@ fun FolderItemRow(
             )
         }
     }
+}
+
+@Composable
+fun FolderItemRow(
+    folder: Folder,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FolderItemRow(
+        folder = folder,
+        onFolderClick = { _ -> onClick() },
+        modifier = modifier
+    )
 }
 
 @Composable

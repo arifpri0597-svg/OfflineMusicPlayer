@@ -1357,7 +1357,8 @@ class MusicPlayerController(
                         )
                     }
                 }
-                delay(200)
+                val pollDelayMs = if (com.example.ui.components.ArtworkCacheManager.isScrollingActive()) 500L else 200L
+                delay(pollDelayMs)
             }
         }
     }
