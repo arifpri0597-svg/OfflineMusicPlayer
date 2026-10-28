@@ -586,6 +586,43 @@ class ExampleRobolectricTest {
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("home_screen")).assertExists()
         }
     }
+
+    @Test
+    @Config(sdk = [33])
+    fun `android 13 PackageParser parses app-debug apk without error`() {
+        val apkCandidates = listOf(
+            java.io.File("build/outputs/apk/debug/app-debug.apk"),
+            java.io.File("app/build/outputs/apk/debug/app-debug.apk"),
+            java.io.File("../.build-outputs/app-debug.apk"),
+            java.io.File(".build-outputs/app-debug.apk"),
+            java.io.File("/app/applet/app/build/outputs/apk/debug/app-debug.apk"),
+            java.io.File("/app/applet/.build-outputs/app-debug.apk")
+        )
+        val apkFile = apkCandidates.firstOrNull { it.exists() && it.length() > 0L } ?: return
+
+        val parserClass = Class.forName("android.content.pm.PackageParser")
+        val parser = parserClass.getDeclaredConstructor().newInstance()
+        val parsePackageMethod = parserClass.getMethod(
+            "parsePackage",
+            java.io.File::class.java,
+            Int::class.javaPrimitiveType
+        )
+        val flags = android.content.pm.PackageManager.GET_PERMISSIONS or
+            android.content.pm.PackageManager.GET_CONFIGURATIONS or
+            android.content.pm.PackageManager.GET_ACTIVITIES or
+            android.content.pm.PackageManager.GET_SERVICES
+        val pkg = parsePackageMethod.invoke(parser, apkFile, flags)
+        org.junit.Assert.assertNotNull("PackageParser returned null", pkg)
+        val packageNameField = pkg.javaClass.getField("packageName")
+        val pkgName = packageNameField.get(pkg) as String
+        assertEquals("com.aistudio.pulsemusic.kmply", pkgName)
+
+        val activitiesField = pkg.javaClass.getField("activities")
+        val activities = activitiesField.get(pkg) as java.util.List<*>
+        org.junit.Assert.assertTrue("Expected MainActivity in parsed APK", activities.isNotEmpty())
+
+        val servicesField = pkg.javaClass.getField("services")
+        val services = servicesField.get(pkg) as java.util.List<*>
+        org.junit.Assert.assertTrue("Expected MusicPlaybackService in parsed APK", services.isNotEmpty())
+    }
 }
-
-

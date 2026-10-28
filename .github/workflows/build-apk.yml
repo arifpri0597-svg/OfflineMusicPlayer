@@ -60,11 +60,15 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --version
 
+      - name: Clean Stale Build Outputs
+        run: |
+          rm -rf app/build build .build-outputs
+
       - name: Build Debug APK
         run: |
-          ./gradlew clean assembleDebug verifyDebugApk --stacktrace
+          ./gradlew clean assembleDebug verifyDebugApk --no-build-cache --no-configuration-cache --stacktrace
 
-      - name: Verify APK Output
+      - name: Verify APK Output (ZIP Integrity, Zipalign, Apksigner, Badging)
         run: |
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           if [ ! -f "$APK_PATH" ]; then
@@ -72,6 +76,13 @@ jobs:
             exit 1
           fi
           ls -lh "$APK_PATH"
+          echo "=== Verifying ZIP Archive Integrity ==="
+          unzip -t "$APK_PATH" > /dev/null
+          ZIPALIGN_BIN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -n 1)
+          if [ -n "$ZIPALIGN_BIN" ]; then
+            echo "=== Verifying APK Alignment with $ZIPALIGN_BIN ==="
+            "$ZIPALIGN_BIN" -c -v 4 "$APK_PATH" | tail -n 10
+          fi
           APKSIGNER_BIN=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
           if [ -n "$APKSIGNER_BIN" ]; then
             echo "=== Verifying APK Signature with $APKSIGNER_BIN ==="
@@ -86,7 +97,9 @@ jobs:
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OfflineMusicPlayer-debug-apk
+          name: PureTune-app-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          overwrite: true
           retention-days: 14
+

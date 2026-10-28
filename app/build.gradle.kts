@@ -10,7 +10,7 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.pulsemusic.kmply"
@@ -23,6 +23,12 @@ android {
 
     ndk {
       abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+    }
+  }
+
+  splits {
+    abi {
+      isEnable = false
     }
   }
 
@@ -74,11 +80,16 @@ android {
     buildConfig = true
   }
   packaging {
+    dex {
+      useLegacyPackaging = true
+    }
     jniLibs {
       useLegacyPackaging = true
     }
     resources {
       excludes += "/META-INF/{AL2.0,LGPL2.1}"
+      excludes += "/META-INF/*.version"
+      excludes += "/META-INF/**/LICENSE.txt"
     }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
@@ -237,22 +248,156 @@ val ensureDebugKeystore =
       }
     }
 
+abstract class NormalizeAndSignDebugApkTask : DefaultTask() {
+  @get:Internal
+  abstract val apkDirProperty: DirectoryProperty
+
+  @get:InputFile
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val keystoreFileProperty: RegularFileProperty
+
+  @get:Internal
+  abstract val dotBuildOutputsApkProperty: RegularFileProperty
+
+  @TaskAction
+  fun normalizeAndSign() {
+    val apkFile = apkDirProperty.get().file("app-debug.apk").asFile
+    if (!apkFile.exists() || apkFile.length() == 0L) {
+      return
+    }
+    val keystoreFile = keystoreFileProperty.get().asFile
+    val sdkRoot =
+        System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk"
+    val buildToolsDir = File(sdkRoot, "build-tools").listFiles()?.sortedBy { it.name }?.lastOrNull()
+    if (buildToolsDir != null) {
+      val zipalign = File(buildToolsDir, "zipalign")
+      val apksigner = File(buildToolsDir, "apksigner")
+      if (zipalign.exists() && apksigner.exists() && keystoreFile.exists()) {
+        val alignedTmp = File(apkFile.parentFile, "app-debug-aligned.tmp.apk")
+        if (alignedTmp.exists()) alignedTmp.delete()
+        val alignProc =
+            ProcessBuilder(
+                    zipalign.absolutePath,
+                    "-f",
+                    "-p",
+                    "4",
+                    apkFile.absolutePath,
+                    alignedTmp.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val alignOut = alignProc.inputStream.bufferedReader().readText()
+        val alignCode = alignProc.waitFor()
+        if (alignCode != 0 || !alignedTmp.exists()) {
+          throw GradleException("zipalign failed (exit=$alignCode):\n$alignOut")
+        }
+        alignedTmp.copyTo(apkFile, overwrite = true)
+        alignedTmp.delete()
+
+        val signProc =
+            ProcessBuilder(
+                    apksigner.absolutePath,
+                    "sign",
+                    "--min-sdk-version",
+                    "21",
+                    "--v1-signing-enabled",
+                    "true",
+                    "--v2-signing-enabled",
+                    "true",
+                    "--v3-signing-enabled",
+                    "true",
+                    "--v4-signing-enabled",
+                    "false",
+                    "--ks",
+                    keystoreFile.absolutePath,
+                    "--ks-pass",
+                    "pass:android",
+                    "--key-pass",
+                    "pass:android",
+                    "--ks-key-alias",
+                    "androiddebugkey",
+                    apkFile.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val signOut = signProc.inputStream.bufferedReader().readText()
+        val signCode = signProc.waitFor()
+        if (signCode != 0) {
+          throw GradleException("apksigner sign failed (exit=$signCode):\n$signOut")
+        }
+        val v4Idsig = File(apkFile.parentFile, "app-debug.apk.idsig")
+        if (v4Idsig.exists()) v4Idsig.delete()
+      }
+    }
+    val dotApk = dotBuildOutputsApkProperty.orNull?.asFile
+    if (dotApk != null) {
+      runCatching {
+        dotApk.parentFile?.mkdirs()
+        if (!dotApk.exists() || dotApk.canonicalPath != apkFile.canonicalPath) {
+          apkFile.copyTo(dotApk, overwrite = true)
+        }
+      }
+    }
+  }
+}
+
+val normalizeAndSignDebugApk =
+    tasks.register<NormalizeAndSignDebugApkTask>("normalizeAndSignDebugApk") {
+      dependsOn(ensureDebugKeystore)
+      apkDirProperty.set(layout.buildDirectory.dir("outputs/apk/debug"))
+      keystoreFileProperty.set(rootProject.layout.projectDirectory.file("debug.keystore"))
+      dotBuildOutputsApkProperty.set(
+          rootProject.layout.projectDirectory.file(".build-outputs/app-debug.apk"))
+    }
+
 tasks
     .matching { it.name == "validateSigningDebug" || it.name == "packageDebug" }
     .configureEach { dependsOn(ensureDebugKeystore) }
+
+tasks
+    .matching { it.name == "packageDebug" || it.name == "createDebugApkListingFileRedirect" }
+    .configureEach { finalizedBy(normalizeAndSignDebugApk) }
+
+tasks
+    .matching { it.name == "assembleDebug" }
+    .configureEach { dependsOn(normalizeAndSignDebugApk) }
 
 abstract class VerifyDebugApkTask : DefaultTask() {
   @get:InputFile
   @get:PathSensitive(PathSensitivity.NONE)
   abstract val apkFileProperty: RegularFileProperty
 
+  @get:InputFile
+  @get:Optional
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val dotBuildOutputsApkProperty: RegularFileProperty
+
+  @get:OutputFile
+  abstract val reportFileProperty: RegularFileProperty
+
   @TaskAction
   fun verifyApk() {
+    val sb = StringBuilder()
+    fun log(msg: String) {
+      println(msg)
+      sb.appendLine(msg)
+    }
+
     val apkFile = apkFileProperty.get().asFile
     if (!apkFile.exists() || apkFile.length() == 0L) {
       throw GradleException("APK not found or empty at ${apkFile.absolutePath}")
     }
-    println("APK_VERIFIED_PATH=${apkFile.absolutePath} (${apkFile.length()} bytes)")
+    log("APK_VERIFIED_PATH=${apkFile.absolutePath} (${apkFile.length()} bytes)")
+
+    val dotApk = dotBuildOutputsApkProperty.orNull?.asFile
+    if (dotApk != null && dotApk.exists()) {
+      log("DOT_BUILD_OUTPUTS_APK=${dotApk.absolutePath} (${dotApk.length()} bytes)")
+      runCatching {
+        ZipFile(dotApk).use { z ->
+          log("DOT_BUILD_OUTPUTS_APK_ENTRIES=${z.size()}")
+        }
+      }.onFailure {
+        log("DOT_BUILD_OUTPUTS_APK_CORRUPT=${it.message}")
+      }
+    }
 
     ZipFile(apkFile).use { zip ->
       val entries = zip.entries().asSequence().toList()
@@ -262,19 +407,37 @@ abstract class VerifyDebugApkTask : DefaultTask() {
       if (!hasManifest || !hasDex || !hasResources) {
         throw GradleException("APK is missing core entries (AndroidManifest.xml, classes.dex, or resources.arsc)")
       }
+      // Verify every single ZIP entry stream can be read without CRC or EOF corruption
+      val readBuf = ByteArray(16384)
+      for (entry in entries) {
+        if (!entry.isDirectory) {
+          zip.getInputStream(entry).use { inp ->
+            while (inp.read(readBuf) != -1) {
+              // consume stream to trigger ZipFile CRC verification
+            }
+          }
+        }
+      }
+      val resEntry = entries.firstOrNull { it.name == "resources.arsc" }
+      log("RESOURCES_ARSC: method=${resEntry?.method} (0=STORED,8=DEFLATED), size=${resEntry?.size}, compressedSize=${resEntry?.compressedSize}")
+      val soEntries = entries.filter { it.name.startsWith("lib/") && it.name.endsWith(".so") }
+      val soMethods = soEntries.map { it.method }.distinct()
+      log("SO_ENTRIES: count=${soEntries.size}, methods=$soMethods, names=${soEntries.map { it.name }}")
+      val metaInfEntries = entries.filter { it.name.startsWith("META-INF/") }.map { it.name }
+      log("META_INF_ENTRIES=$metaInfEntries")
       val abis =
-          entries
-              .filter { it.name.startsWith("lib/") && it.name.endsWith(".so") }
+          soEntries
               .map { it.name.split("/")[1] }
               .distinct()
               .sorted()
-      println("APK_VERIFIED_ENTRIES=${entries.size}, ABIS=$abis")
+      log("APK_VERIFIED_ENTRIES=${entries.size}, ABIS=$abis")
     }
 
     val sdkRoot =
         System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk"
     val buildToolsDir = File(sdkRoot, "build-tools").listFiles()?.sortedBy { it.name }?.lastOrNull()
     if (buildToolsDir != null) {
+      log("USING_BUILD_TOOLS=${buildToolsDir.absolutePath}")
       val apksigner = File(buildToolsDir, "apksigner")
       if (apksigner.exists()) {
         val proc =
@@ -290,8 +453,7 @@ abstract class VerifyDebugApkTask : DefaultTask() {
                 .start()
         val out = proc.inputStream.bufferedReader().readText()
         val code = proc.waitFor()
-        val summary = out.lines().take(18).joinToString(" | ")
-        println("APKSIGNER_SUMMARY (exit=$code): $summary")
+        log("APKSIGNER_MIN21_FULL (exit=$code):\n$out")
         if (code != 0) throw GradleException("apksigner verify failed:\n$out")
       }
       val aapt2 = File(buildToolsDir, "aapt2")
@@ -302,26 +464,51 @@ abstract class VerifyDebugApkTask : DefaultTask() {
                 .start()
         val out = proc.inputStream.bufferedReader().readText()
         val code = proc.waitFor()
-        val summary = out.lines().take(5).joinToString(" | ")
-        println("AAPT2_BADGING_SUMMARY (exit=$code): $summary")
+        log("AAPT2_BADGING_FULL (exit=$code):\n$out")
         if (code != 0) throw GradleException("aapt2 dump badging failed:\n$out")
+
+        val xmlProc =
+            ProcessBuilder(
+                    aapt2.absolutePath,
+                    "dump",
+                    "xmltree",
+                    apkFile.absolutePath,
+                    "--file",
+                    "AndroidManifest.xml")
+                .redirectErrorStream(true)
+                .start()
+        val xmlOut = xmlProc.inputStream.bufferedReader().readText()
+        val xmlCode = xmlProc.waitFor()
+        log("AAPT2_XMLTREE [AndroidManifest.xml] (exit=$xmlCode):\n$xmlOut")
+        if (xmlCode != 0) throw GradleException("aapt2 dump xmltree failed:\n$xmlOut")
       }
       val zipalign = File(buildToolsDir, "zipalign")
       if (zipalign.exists()) {
         val proc =
-            ProcessBuilder(zipalign.absolutePath, "-c", "4", apkFile.absolutePath)
+            ProcessBuilder(zipalign.absolutePath, "-c", "-v", "4", apkFile.absolutePath)
                 .redirectErrorStream(true)
                 .start()
+        val zOut = proc.inputStream.bufferedReader().readText()
         val code = proc.waitFor()
-        println("ZIPALIGN_CHECK (exit=$code)")
+        val badAlignLines = zOut.lines().filter { it.contains("BAD") }
+        log("ZIPALIGN_CHECK_4 (exit=$code, badLines=${badAlignLines.size}): $badAlignLines")
         if (code != 0) throw GradleException("zipalign check failed")
       }
     }
+    val reportFile = reportFileProperty.get().asFile
+    reportFile.parentFile?.mkdirs()
+    reportFile.writeText(sb.toString())
   }
 }
 
 tasks.register<VerifyDebugApkTask>("verifyDebugApk") {
-  dependsOn("assembleDebug")
+  dependsOn("assembleDebug", normalizeAndSignDebugApk)
   apkFileProperty.set(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+  val dotApkFile = rootProject.file(".build-outputs/app-debug.apk")
+  if (dotApkFile.exists()) {
+    dotBuildOutputsApkProperty.set(dotApkFile)
+  }
+  reportFileProperty.set(layout.buildDirectory.file("apk-inspection.txt"))
 }
+
 
