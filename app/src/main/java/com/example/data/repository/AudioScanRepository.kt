@@ -327,7 +327,9 @@ class AudioScanRepository(
                     artist = firstSong.artist.ifBlank { "Unknown Artist" },
                     artworkUri = artworkSong.albumArtUri,
                     songCount = songGroup.size,
-                    year = firstSong.year
+                    year = firstSong.year,
+                    fallbackAudioUri = artworkSong.contentUri,
+                    fallbackAudioPath = artworkSong.path
                 )
             }
             .distinctBy { "${it.id}_${it.title}" }

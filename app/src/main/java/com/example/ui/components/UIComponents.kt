@@ -147,10 +147,12 @@ fun SongItemRow(
             contentAlignment = Alignment.Center
         ) {
             FastArtworkImage(
-                artworkUri = song.albumArtUriString,
+                artworkUri = song.albumArtUriString ?: song.contentUriString,
                 cacheKeyPrefix = "thumb",
                 sizePx = 144,
                 contentDescription = "Album art",
+                fallbackUri = song.contentUriString,
+                fallbackPath = song.path,
                 modifier = Modifier.fillMaxSize()
             ) {
                 Icon(
@@ -295,10 +297,12 @@ fun AlbumCard(
     ) {
         Column {
             FastArtworkImage(
-                artworkUri = album.artworkUriString,
+                artworkUri = album.artworkUriString ?: album.fallbackAudioUriString,
                 cacheKeyPrefix = "album",
                 sizePx = 256,
                 contentDescription = album.title,
+                fallbackUri = album.fallbackAudioUriString,
+                fallbackPath = album.fallbackAudioPath,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)

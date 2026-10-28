@@ -136,7 +136,10 @@ fun MiniPlayer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     MiniPlayerArtwork(
-                        albumArtUriString = song.albumArtUriString,
+                        albumArtUriString = song.albumArtUriString ?: playerState.mediaArtworkUriString,
+                        fallbackUriString = song.contentUriString,
+                        fallbackPath = song.path,
+                        artworkBytes = playerState.artworkBytes,
                         isBuffering = playerState.isBuffering
                     )
 
@@ -244,6 +247,9 @@ private fun MiniPlayerPositionText(
 @Composable
 private fun MiniPlayerArtwork(
     albumArtUriString: String?,
+    fallbackUriString: String? = null,
+    fallbackPath: String? = null,
+    artworkBytes: ByteArray? = null,
     isBuffering: Boolean
 ) {
     Box(
@@ -254,10 +260,13 @@ private fun MiniPlayerArtwork(
         contentAlignment = Alignment.Center
     ) {
         FastArtworkImage(
-            artworkUri = albumArtUriString,
+            artworkUri = albumArtUriString ?: fallbackUriString,
             cacheKeyPrefix = "thumb",
             sizePx = 144,
             contentDescription = "Mini player artwork",
+            fallbackUri = fallbackUriString,
+            fallbackPath = fallbackPath,
+            artworkBytes = artworkBytes,
             modifier = Modifier.fillMaxSize()
         ) {
             Icon(

@@ -251,7 +251,12 @@ fun NowPlayingScreen(
                     .background(ArtworkBackdropBrush),
                 contentAlignment = Alignment.Center
             ) {
-                NowPlayingHeroArtwork(albumArtUriString = song.albumArtUri?.toString())
+                NowPlayingHeroArtwork(
+                    albumArtUriString = song.albumArtUriString ?: playerState.mediaArtworkUriString,
+                    fallbackUriString = song.contentUriString,
+                    fallbackPath = song.path,
+                    artworkBytes = playerState.artworkBytes
+                )
             }
 
             // 3. Song Information (Centered title & Artist underneath)
@@ -1144,13 +1149,19 @@ private fun NowPlayingTopBar(
 
 @Composable
 private fun NowPlayingHeroArtwork(
-    albumArtUriString: String?
+    albumArtUriString: String?,
+    fallbackUriString: String? = null,
+    fallbackPath: String? = null,
+    artworkBytes: ByteArray? = null
 ) {
     com.example.ui.components.FastArtworkImage(
-        artworkUri = albumArtUriString,
+        artworkUri = albumArtUriString ?: fallbackUriString,
         cacheKeyPrefix = "hero",
         sizePx = 512,
         contentDescription = "Album Artwork",
+        fallbackUri = fallbackUriString,
+        fallbackPath = fallbackPath,
+        artworkBytes = artworkBytes,
         modifier = Modifier
             .fillMaxSize()
             .testTag("now_playing_artwork")

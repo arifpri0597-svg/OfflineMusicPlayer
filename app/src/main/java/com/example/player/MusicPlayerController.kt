@@ -141,6 +141,19 @@ class MusicPlayerController(
             }
         }
 
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            val artBytes = mediaMetadata.artworkData?.takeIf { it.isNotEmpty() }
+            val artUriStr = mediaMetadata.artworkUri?.toString()?.takeIf { it.isNotBlank() }
+            if (artBytes != null || artUriStr != null) {
+                _uiState.update { state ->
+                    state.copy(
+                        mediaArtworkUriString = artUriStr ?: state.mediaArtworkUriString,
+                        artworkBytes = artBytes ?: state.artworkBytes
+                    )
+                }
+            }
+        }
+
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
@@ -1289,7 +1302,18 @@ class MusicPlayerController(
             _uiState.value.playbackSpeed
         }
 
+        val playerMetadata = try {
+            player.mediaMetadata
+        } catch (_: Exception) {
+            null
+        }
+        val mediaArtBytes = playerMetadata?.artworkData?.takeIf { it.isNotEmpty() }
+        val mediaArtUriStr = playerMetadata?.artworkUri?.toString()?.takeIf { it.isNotBlank() }
+            ?: currentSong?.albumArtUriString
+
         _uiState.update {
+            val isSameTrack = it.currentSong?.id == currentSong?.id &&
+                it.currentSong?.contentUriString == currentSong?.contentUriString
             it.copy(
                 currentSong = currentSong,
                 currentIndex = if (currentIndex >= 0) currentIndex else it.currentIndex,
@@ -1299,7 +1323,9 @@ class MusicPlayerController(
                 isShuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = repeat,
                 playbackSpeed = speed,
-                queue = immutableQueue
+                queue = immutableQueue,
+                mediaArtworkUriString = mediaArtUriStr ?: if (isSameTrack) it.mediaArtworkUriString else null,
+                artworkBytes = mediaArtBytes ?: if (isSameTrack) it.artworkBytes else null
             )
         }
     }

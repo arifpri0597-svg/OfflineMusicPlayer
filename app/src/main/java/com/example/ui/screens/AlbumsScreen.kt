@@ -114,10 +114,12 @@ fun AlbumsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         com.example.ui.components.FastArtworkImage(
-                            artworkUri = selectedAlbum.artworkUriString,
+                            artworkUri = selectedAlbum.artworkUriString ?: selectedAlbum.fallbackAudioUriString,
                             cacheKeyPrefix = "album",
                             sizePx = 256,
                             contentDescription = selectedAlbum.title,
+                            fallbackUri = selectedAlbum.fallbackAudioUriString,
+                            fallbackPath = selectedAlbum.fallbackAudioPath,
                             modifier = Modifier
                                 .size(110.dp)
                                 .clip(RoundedCornerShape(16.dp))

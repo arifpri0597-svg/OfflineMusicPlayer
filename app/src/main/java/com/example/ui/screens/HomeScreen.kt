@@ -826,10 +826,12 @@ private fun HomeAlbumCard(
     ) {
         Column {
             com.example.ui.components.FastArtworkImage(
-                artworkUri = album.artworkUriString,
+                artworkUri = album.artworkUriString ?: album.fallbackAudioUriString,
                 cacheKeyPrefix = "album",
                 sizePx = 256,
                 contentDescription = album.title,
+                fallbackUri = album.fallbackAudioUriString,
+                fallbackPath = album.fallbackAudioPath,
                 modifier = Modifier
                     .size(142.dp)
                     .background(HomeAlbumBackdropBrush)

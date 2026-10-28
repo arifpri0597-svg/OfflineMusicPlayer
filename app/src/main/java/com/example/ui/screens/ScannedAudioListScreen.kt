@@ -411,10 +411,12 @@ private fun ScannedAudioItemRow(
     ) {
         // Artwork / Thumbnail with synchronous LruCache & negative URI cache
         com.example.ui.components.FastArtworkImage(
-            artworkUri = song.albumArtUriString,
+            artworkUri = song.albumArtUriString ?: song.contentUriString,
             cacheKeyPrefix = "thumb",
             sizePx = 144,
             contentDescription = song.title,
+            fallbackUri = song.contentUriString,
+            fallbackPath = song.path,
             modifier = Modifier
                 .size(50.dp)
                 .clip(ScannedThumbShape)

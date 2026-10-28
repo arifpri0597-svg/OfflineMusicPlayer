@@ -10,10 +10,13 @@ data class Album(
     val artist: String,
     val artworkUri: Uri?,
     val songCount: Int,
-    val year: Int = 0
+    val year: Int = 0,
+    val fallbackAudioUri: Uri? = null,
+    val fallbackAudioPath: String = ""
 ) {
     val stableKey: String = "${id}_${title}"
     val artworkUriString: String? = artworkUri?.toString()?.takeIf { it.isNotBlank() }
+    val fallbackAudioUriString: String? = fallbackAudioUri?.toString()?.takeIf { it.isNotBlank() }
     val tracksSubtitle: String = "$artist • $songCount tracks"
     val songCountLabel: String = "$songCount songs"
 }

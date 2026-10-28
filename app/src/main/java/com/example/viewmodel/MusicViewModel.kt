@@ -116,7 +116,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 old.repeatMode == new.repeatMode &&
                 old.playbackSpeed == new.playbackSpeed &&
                 old.queue === new.queue &&
-                old.errorMessage == new.errorMessage
+                old.errorMessage == new.errorMessage &&
+                old.mediaArtworkUriString == new.mediaArtworkUriString &&
+                old.artworkBytes === new.artworkBytes
         }
         .stateIn(
             scope = viewModelScope,
@@ -285,24 +287,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
                                 // Prewarm initial visible thumbnails on background threads so first scroll is instant
                                 launch(Dispatchers.IO) {
-                                    val thumbUris = songsList.asSequence()
+                                    val thumbSources = songsList.asSequence()
                                         .take(30)
-                                        .mapNotNull { it.albumArtUriString }
+                                        .map { Triple(it.albumArtUriString, it.contentUriString, it.path) }
                                         .distinct()
                                         .toList()
-                                    com.example.ui.components.ArtworkCacheManager.prewarmArtwork(
+                                    com.example.ui.components.ArtworkCacheManager.prewarmArtworkSources(
                                         context = app,
-                                        uriStrings = thumbUris,
+                                        sources = thumbSources,
                                         sizePx = 144
                                     )
-                                    val albumUris = albums.asSequence()
+                                    val albumSources = albums.asSequence()
                                         .take(16)
-                                        .mapNotNull { it.artworkUriString }
+                                        .map { Triple(it.artworkUriString, it.fallbackAudioUriString, it.fallbackAudioPath) }
                                         .distinct()
                                         .toList()
-                                    com.example.ui.components.ArtworkCacheManager.prewarmArtwork(
+                                    com.example.ui.components.ArtworkCacheManager.prewarmArtworkSources(
                                         context = app,
-                                        uriStrings = albumUris,
+                                        sources = albumSources,
                                         sizePx = 256
                                     )
                                 }

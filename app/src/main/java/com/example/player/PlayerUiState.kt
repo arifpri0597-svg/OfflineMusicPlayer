@@ -17,7 +17,9 @@ data class PlayerUiState(
     val queue: List<Song> = emptyList(),
     val currentIndex: Int = -1,
     val isBuffering: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val mediaArtworkUriString: String? = null,
+    val artworkBytes: ByteArray? = null
 ) {
     val progress: Float
         get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f

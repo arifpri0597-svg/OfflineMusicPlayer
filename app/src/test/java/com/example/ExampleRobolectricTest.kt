@@ -272,6 +272,54 @@ class ExampleRobolectricTest {
 
         com.example.ui.components.ArtworkCacheManager.clear()
         assertFalse(com.example.ui.components.ArtworkCacheManager.isKnownMissing(missingArtUri))
+
+        // Verify multi-source decoding: even when primary albumart URI is missing, embedded bytes or fallback URI resolves artwork
+        val appContext = ApplicationProvider.getApplicationContext<PulseMusicApp>()
+        val testBitmap = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+        testBitmap.eraseColor(android.graphics.Color.MAGENTA)
+        val pngBytes = java.io.ByteArrayOutputStream().use { bos ->
+            testBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos)
+            bos.toByteArray()
+        }
+        val fallbackFile = java.io.File(appContext.cacheDir, "fallback_cover_test.png")
+        fallbackFile.writeBytes(pngBytes)
+
+        runBlocking {
+            // 1. Decode using embedded artworkBytes (same source as Media3 notification/lock screen)
+            val heroFromBytes = com.example.ui.components.ArtworkCacheManager.loadOrDecodeArtwork(
+                context = appContext,
+                primaryUri = missingArtUri,
+                fallbackUri = "content://media/external/audio/media/777",
+                fallbackPath = null,
+                artworkBytes = pngBytes,
+                sizePx = 512
+            )
+            org.junit.Assert.assertNotNull("Expected 512px Now Playing hero artwork to decode from embedded bytes", heroFromBytes)
+
+            // 2. Verify primaryUri is now cached and verified at 512px
+            val cachedLookup = com.example.ui.components.ArtworkCacheManager.getBestAvailableBitmap(
+                primaryUri = missingArtUri,
+                fallbackUri = "content://media/external/audio/media/777",
+                fallbackPath = null,
+                sizePx = 512
+            )
+            org.junit.Assert.assertNotNull("Expected cached hero bitmap to be returned synchronously", cachedLookup.first)
+            assertTrue("Expected exact 512px resolution match", cachedLookup.second)
+
+            // 3. Also verify file:// URI decoding for 144px thumbnail and 256px album art
+            val fileUriStr = android.net.Uri.fromFile(fallbackFile).toString()
+            val thumbBitmap = com.example.ui.components.ArtworkCacheManager.loadOrDecodeArtwork(
+                context = appContext,
+                primaryUri = fileUriStr,
+                fallbackUri = null,
+                fallbackPath = fallbackFile.absolutePath,
+                artworkBytes = null,
+                sizePx = 144
+            )
+            org.junit.Assert.assertNotNull("Expected 144px thumbnail to decode from file URI", thumbBitmap)
+        }
+        fallbackFile.delete()
+        com.example.ui.components.ArtworkCacheManager.clear()
     }
 
     @get:org.junit.Rule
