@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestHighRefreshRateDisplayMode()
+        applyActivePerformanceMode()
 
         val initialGranted = checkAudioPermission()
         viewModel.onPermissionResult(initialGranted)
@@ -105,6 +105,16 @@ class MainActivity : ComponentActivity() {
             val libraryStateRef = viewModel.libraryState.collectAsState()
             val userThemePreference by remember {
                 androidx.compose.runtime.derivedStateOf { libraryStateRef.value.userThemePreference }
+            }
+            val performanceMode by remember {
+                androidx.compose.runtime.derivedStateOf { libraryStateRef.value.performanceMode }
+            }
+
+            androidx.compose.runtime.LaunchedEffect(performanceMode) {
+                com.example.util.PerformanceModeManager.applyPerformanceMode(
+                    activity = this@MainActivity,
+                    mode = performanceMode
+                )
             }
 
             val isDarkTheme = when (userThemePreference) {
@@ -165,7 +175,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        requestHighRefreshRateDisplayMode()
+        applyActivePerformanceMode()
         if (isFinishing || isDestroyed || isPermissionRequestInFlight) return
         // Re-check permissions on resume (e.g., if user returned from Settings or permission dialog)
         val hasPermission = checkAudioPermission()
@@ -175,47 +185,22 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            requestHighRefreshRateDisplayMode()
+            applyActivePerformanceMode()
         }
     }
 
     /**
-     * Explicitly requests the highest supported display refresh rate (e.g. 120Hz / 90Hz)
-     * matching the active physical resolution so Android OEM window managers do not cap
-     * scrolling at 60Hz.
+     * Applies the user's selected [com.example.data.model.PerformanceMode]:
+     * - Keeps the physical display refresh rate at 120Hz (or highest supported hardware refresh rate)
+     *   in BOTH "60 FPS + 120Hz" and "120 FPS + 120Hz" modes (never forcing the display down to 60Hz).
+     * - Configures the rendering frame rate target (60 FPS vs 120 FPS) with safe fallback on
+     *   devices that do not support 120Hz.
      */
-    private fun requestHighRefreshRateDisplayMode() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        try {
-            val activeDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display
-            } else {
-                @Suppress("DEPRECATION")
-                windowManager.defaultDisplay
-            } ?: return
-
-            val currentMode = activeDisplay.mode ?: return
-            val supportedModes = activeDisplay.supportedModes ?: return
-            val bestMode = supportedModes
-                .filter {
-                    it.physicalWidth == currentMode.physicalWidth &&
-                        it.physicalHeight == currentMode.physicalHeight
-                }
-                .maxByOrNull { it.refreshRate }
-                ?: supportedModes.maxByOrNull { it.refreshRate }
-                ?: return
-
-            val params = window.attributes
-            if (params.preferredDisplayModeId != bestMode.modeId ||
-                params.preferredRefreshRate != bestMode.refreshRate
-            ) {
-                params.preferredDisplayModeId = bestMode.modeId
-                params.preferredRefreshRate = bestMode.refreshRate
-                window.attributes = params
-            }
-        } catch (_: Throwable) {
-            // Safe no-op on emulators or devices that restrict display mode changes
-        }
+    private fun applyActivePerformanceMode() {
+        com.example.util.PerformanceModeManager.applyPerformanceMode(
+            activity = this,
+            mode = viewModel.libraryState.value.performanceMode
+        )
     }
 
     override fun onPause() {
@@ -405,6 +390,9 @@ fun PulseMusicAppRoot(
     val onThemeChange = remember(viewModel) { { mode: String -> viewModel.setThemeMode(mode) } }
     val onResumeLastChange = remember(viewModel) { { enabled: Boolean -> viewModel.setResumeLastPlayback(enabled) } }
     val onPauseOnHeadsetUnplugChange = remember(viewModel) { { enabled: Boolean -> viewModel.setPauseOnHeadsetUnplug(enabled) } }
+    val onPerformanceModeChange = remember(viewModel) {
+        { mode: com.example.data.model.PerformanceMode -> viewModel.setPerformanceMode(mode) }
+    }
     val onNavigateToSongs = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.SONGS) } }
     val onNavigateToAlbums = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.ALBUMS) } }
     val onNavigateToPlaylists = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.PLAYLISTS) } }
@@ -650,7 +638,9 @@ fun PulseMusicAppRoot(
                                 resumeLastPlayback = libraryState.resumeLastPlayback,
                                 onResumeLastChange = onResumeLastChange,
                                 autoPauseOnHeadsetUnplug = libraryState.pauseOnHeadsetUnplug,
-                                onPauseOnHeadsetUnplugChange = onPauseOnHeadsetUnplugChange
+                                onPauseOnHeadsetUnplugChange = onPauseOnHeadsetUnplugChange,
+                                performanceMode = libraryState.performanceMode,
+                                onPerformanceModeChange = onPerformanceModeChange
                             )
                         }
                     }

@@ -663,4 +663,81 @@ class ExampleRobolectricTest {
         val services = servicesField.get(pkg) as java.util.List<*>
         org.junit.Assert.assertTrue("Expected MusicPlaybackService in parsed APK", services.isNotEmpty())
     }
+
+    @Test
+    @Config(sdk = [33])
+    fun `performanceMode separates 60 and 120 FPS rendering from 120Hz display refresh rate and persists across restarts`() = runBlocking {
+        val modes120Hz = listOf(
+            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f),
+            com.example.util.DisplayModeSpec(modeId = 2, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 90f),
+            com.example.util.DisplayModeSpec(modeId = 3, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 120f)
+        )
+
+        // 1. 60 FPS + 120Hz mode: Display MUST stay at 120Hz (modeId = 3) while rendering targets 60 FPS
+        val cap60 = com.example.util.PerformanceModeManager.resolveCapabilitiesFromModes(
+            currentRefreshRate = 60f,
+            currentWidth = 1080,
+            currentHeight = 2400,
+            supportedModes = modes120Hz,
+            mode = com.example.data.model.PerformanceMode.FPS_60_HZ_120
+        )
+        assertTrue(cap60.supports120Hz)
+        assertEquals(3, cap60.preferredDisplayModeId)
+        assertEquals(120f, cap60.effectiveDisplayHz, 0.01f)
+        assertEquals(60f, cap60.effectiveRenderFps, 0.01f)
+
+        // 2. 120 FPS + 120Hz mode: Display stays at 120Hz (modeId = 3) and rendering targets 120 FPS
+        val cap120 = com.example.util.PerformanceModeManager.resolveCapabilitiesFromModes(
+            currentRefreshRate = 60f,
+            currentWidth = 1080,
+            currentHeight = 2400,
+            supportedModes = modes120Hz,
+            mode = com.example.data.model.PerformanceMode.FPS_120_HZ_120
+        )
+        assertTrue(cap120.supports120Hz)
+        assertEquals(3, cap120.preferredDisplayModeId)
+        assertEquals(120f, cap120.effectiveDisplayHz, 0.01f)
+        assertEquals(120f, cap120.effectiveRenderFps, 0.01f)
+
+        // 3. Safe fallback on a 60Hz-only device
+        val modes60HzOnly = listOf(
+            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f)
+        )
+        val fallback120 = com.example.util.PerformanceModeManager.resolveCapabilitiesFromModes(
+            currentRefreshRate = 60f,
+            currentWidth = 1080,
+            currentHeight = 2400,
+            supportedModes = modes60HzOnly,
+            mode = com.example.data.model.PerformanceMode.FPS_120_HZ_120
+        )
+        assertFalse(fallback120.supports120Hz)
+        assertEquals(60f, fallback120.effectiveDisplayHz, 0.01f)
+        assertEquals(60f, fallback120.effectiveRenderFps, 0.01f)
+
+        // 4. Verify SixtiesOnHighHzFrameClock skips intermediate 8.33ms 120Hz VSYNC tick to deliver 60 FPS (16.67ms)
+        var simulatedVsyncNanos = 100_000_000L
+        val fake120HzClock = object : androidx.compose.runtime.MonotonicFrameClock {
+            override suspend fun <R> withFrameNanos(onFrame: (frameTimeNanos: Long) -> R): R {
+                simulatedVsyncNanos += 8_333_333L // 8.33ms (120Hz VSYNC)
+                return onFrame(simulatedVsyncNanos)
+            }
+        }
+        val pacedClock = com.example.util.SixtiesOnHighHzFrameClock(fake120HzClock)
+        val firstFrameTime = pacedClock.withFrameNanos { it }
+        val secondFrameTime = pacedClock.withFrameNanos { it }
+        // The interval between delivered frames must be 2 x 8.33ms = 16.67ms (60 FPS on 120Hz display)
+        assertEquals(16_666_666L, secondFrameTime - firstFrameTime)
+
+        // 5. Verify persistence across app restarts via UserPreferences
+        val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
+        val prefs = app.userPreferences
+        prefs.setPerformanceMode(com.example.data.model.PerformanceMode.FPS_120_HZ_120)
+        assertEquals(com.example.data.model.PerformanceMode.FPS_120_HZ_120, prefs.getInitialPerformanceModeSync())
+        assertEquals(com.example.data.model.PerformanceMode.FPS_120_HZ_120, prefs.performanceMode.first())
+
+        prefs.setPerformanceMode(com.example.data.model.PerformanceMode.FPS_60_HZ_120)
+        assertEquals(com.example.data.model.PerformanceMode.FPS_60_HZ_120, prefs.getInitialPerformanceModeSync())
+        assertEquals(com.example.data.model.PerformanceMode.FPS_60_HZ_120, prefs.performanceMode.first())
+    }
 }
+

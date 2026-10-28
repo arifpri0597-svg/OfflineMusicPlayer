@@ -127,7 +127,22 @@ object ArtworkCacheManager {
     @Volatile
     private var diskCacheDir: File? = null
 
+    @Volatile
+    private var performanceMode: com.example.data.model.PerformanceMode =
+        com.example.data.model.PerformanceMode.FPS_60_HZ_120
+
     private val missingArtworkException = NoSuchElementException("Cached missing album artwork")
+
+    fun setPerformanceMode(mode: com.example.data.model.PerformanceMode) {
+        performanceMode = mode
+    }
+
+    fun getPerformanceMode(): com.example.data.model.PerformanceMode = performanceMode
+
+    fun getFlingDebounceMs(): Long = when (performanceMode) {
+        com.example.data.model.PerformanceMode.FPS_60_HZ_120 -> 64L
+        com.example.data.model.PerformanceMode.FPS_120_HZ_120 -> 48L
+    }
 
     fun onScrollStart() {
         activeScrollCount.incrementAndGet()
@@ -1259,10 +1274,10 @@ fun FastArtworkImage(
 
     val context = LocalContext.current
     LaunchedEffect(key, bHash) {
-        // For list/grid thumbnails (<= 256px), wait 55ms before touching ContentResolver/disk I/O.
-        // During a 120Hz fling, items fly past in < 45ms and cancel here with ZERO I/O or recomposition!
+        // For list/grid thumbnails (<= 256px), wait for fling-settle debounce before touching ContentResolver/disk I/O.
+        // During a fast fling, items fly past and cancel here with ZERO I/O or recomposition!
         if (bucket <= 256) {
-            delay(55L)
+            delay(ArtworkCacheManager.getFlingDebounceMs())
         }
         val decoded = ArtworkCacheManager.loadOrDecodeArtwork(
             context = context,

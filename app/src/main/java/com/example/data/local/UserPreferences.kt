@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.data.model.PerformanceMode
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -20,6 +21,11 @@ class UserPreferences(private val context: Context) {
     private val KEY_THEME = stringPreferencesKey("theme_mode")
     private val KEY_RESUME_LAST = booleanPreferencesKey("resume_last")
     private val KEY_PAUSE_ON_HEADSET_UNPLUG = booleanPreferencesKey("pause_on_headset_unplug")
+    private val KEY_PERFORMANCE_MODE = stringPreferencesKey("performance_mode")
+
+    private val syncBootPrefs by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        context.applicationContext.getSharedPreferences("pulse_boot_prefs", Context.MODE_PRIVATE)
+    }
 
     private val safePreferencesFlow: Flow<Preferences> = context.dataStore.data
         .catch { exception ->
@@ -40,6 +46,21 @@ class UserPreferences(private val context: Context) {
 
     val pauseOnHeadsetUnplug: Flow<Boolean> = safePreferencesFlow.map { preferences ->
         preferences[KEY_PAUSE_ON_HEADSET_UNPLUG] ?: true
+    }
+
+    val performanceMode: Flow<PerformanceMode> = safePreferencesFlow.map { preferences ->
+        val raw = preferences[KEY_PERFORMANCE_MODE]
+            ?: syncBootPrefs.getString("performance_mode", null)
+        PerformanceMode.fromStorageKey(raw)
+    }
+
+    fun getInitialPerformanceModeSync(): PerformanceMode {
+        val raw = try {
+            syncBootPrefs.getString("performance_mode", null)
+        } catch (_: Throwable) {
+            null
+        }
+        return PerformanceMode.fromStorageKey(raw)
     }
 
     suspend fun setThemeMode(theme: String) {
@@ -68,4 +89,18 @@ class UserPreferences(private val context: Context) {
         } catch (_: IOException) {
         }
     }
+
+    suspend fun setPerformanceMode(mode: PerformanceMode) {
+        try {
+            syncBootPrefs.edit().putString("performance_mode", mode.storageKey).apply()
+        } catch (_: Throwable) {
+        }
+        try {
+            context.dataStore.edit { preferences ->
+                preferences[KEY_PERFORMANCE_MODE] = mode.storageKey
+            }
+        } catch (_: IOException) {
+        }
+    }
 }
+
