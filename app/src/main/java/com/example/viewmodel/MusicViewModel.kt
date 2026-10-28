@@ -288,7 +288,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 // Prewarm initial visible thumbnails on background threads so first scroll is instant
                                 launch(Dispatchers.IO) {
                                     val thumbSources = songsList.asSequence()
-                                        .take(30)
+                                        .take(60)
                                         .map { Triple(it.albumArtUriString, it.contentUriString, it.path) }
                                         .distinct()
                                         .toList()
@@ -298,7 +298,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                         sizePx = 144
                                     )
                                     val albumSources = albums.asSequence()
-                                        .take(16)
+                                        .take(30)
                                         .map { Triple(it.artworkUriString, it.fallbackAudioUriString, it.fallbackAudioPath) }
                                         .distinct()
                                         .toList()

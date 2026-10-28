@@ -135,11 +135,11 @@ fun ArtistsScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onArtistSongClick(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onPlayNext = { onPlayNext(song) },
-                    onAddToQueue = { onAddToQueue(song) },
-                    onAddToPlaylist = { onAddToPlaylist(song) }
+                    onSongClick = onArtistSongClick,
+                    onToggleFavorite = onToggleFavorite,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist
                 )
             }
         }
@@ -165,7 +165,7 @@ fun ArtistsScreen(
                 ) { artist ->
                     ArtistItemRow(
                         artist = artist,
-                        onClick = { onArtistSelect(artist) }
+                        onArtistClick = onArtistSelect
                     )
                 }
             }
@@ -266,11 +266,11 @@ fun FoldersScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onFolderSongClick(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onPlayNext = { onPlayNext(song) },
-                    onAddToQueue = { onAddToQueue(song) },
-                    onAddToPlaylist = { onAddToPlaylist(song) }
+                    onSongClick = onFolderSongClick,
+                    onToggleFavorite = onToggleFavorite,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist
                 )
             }
         }
@@ -296,7 +296,7 @@ fun FoldersScreen(
                 ) { folder ->
                     FolderItemRow(
                         folder = folder,
-                        onClick = { onFolderSelect(folder) }
+                        onFolderClick = onFolderSelect
                     )
                 }
             }

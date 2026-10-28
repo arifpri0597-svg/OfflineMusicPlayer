@@ -8,6 +8,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -427,7 +428,7 @@ fun HomeScreen(
                         ) { album ->
                             HomeAlbumCard(
                                 album = album,
-                                onClick = { onAlbumClick(album) }
+                                onAlbumClick = onAlbumClick
                             )
                         }
                     }
@@ -481,11 +482,11 @@ fun HomeScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = true,
-                    onSongClick = { onFavoriteSongClick(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onPlayNext = { onPlayNext(song) },
-                    onAddToQueue = { onAddToQueue(song) },
-                    onAddToPlaylist = { onAddToPlaylist(song) }
+                    onSongClick = onFavoriteSongClick,
+                    onToggleFavorite = onToggleFavorite,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist
                 )
             }
         }
@@ -536,11 +537,11 @@ fun HomeScreen(
                 song = song,
                 isPlaying = isPlaying && currentSongId == song.id,
                 isFavorite = song.isFavorite || favoriteIdSet.contains(song.id),
-                onSongClick = { onAllTrackSongClick(song) },
-                onToggleFavorite = { onToggleFavorite(song.id) },
-                onPlayNext = { onPlayNext(song) },
-                onAddToQueue = { onAddToQueue(song) },
-                onAddToPlaylist = { onAddToPlaylist(song) }
+                onSongClick = onAllTrackSongClick,
+                onToggleFavorite = onToggleFavorite,
+                onPlayNext = onPlayNext,
+                onAddToQueue = onAddToQueue,
+                onAddToPlaylist = onAddToPlaylist
             )
         }
         }
@@ -812,51 +813,53 @@ private fun PureTuneHeroBanner(
 @Composable
 private fun HomeAlbumCard(
     album: Album,
-    onClick: () -> Unit
+    onAlbumClick: (Album) -> Unit
 ) {
-    Card(
+    val handleClick = remember(album, onAlbumClick) { { onAlbumClick(album) } }
+    val colorScheme = MaterialTheme.colorScheme
+    val containerColor = colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val borderColor = colorScheme.outline.copy(alpha = 0.3f)
+
+    Column(
         modifier = Modifier
             .width(142.dp)
-            .clickable(onClick = onClick),
-        shape = HomeAlbumCardShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
+            .background(color = containerColor, shape = HomeAlbumCardShape)
+            .border(width = 1.dp, color = borderColor, shape = HomeAlbumCardShape)
+            .clip(HomeAlbumCardShape)
+            .clickable(onClick = handleClick)
     ) {
-        Column {
-            com.example.ui.components.FastArtworkImage(
-                artworkUri = album.artworkUriString ?: album.fallbackAudioUriString,
-                cacheKeyPrefix = "album",
-                sizePx = 256,
-                contentDescription = album.title,
-                fallbackUri = album.fallbackAudioUriString,
-                fallbackPath = album.fallbackAudioPath,
-                modifier = Modifier
-                    .size(142.dp)
-                    .background(HomeAlbumBackdropBrush)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Album,
-                    contentDescription = null,
-                    tint = NeonPinkLight,
-                    modifier = Modifier.size(44.dp)
-                )
-            }
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = album.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = album.songCountLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NeonPurple
-                )
-            }
+        com.example.ui.components.FastArtworkImage(
+            artworkUri = album.artworkUriString ?: album.fallbackAudioUriString,
+            cacheKeyPrefix = "album",
+            sizePx = 256,
+            contentDescription = album.title,
+            fallbackUri = album.fallbackAudioUriString,
+            fallbackPath = album.fallbackAudioPath,
+            modifier = Modifier
+                .size(142.dp)
+                .background(HomeAlbumBackdropBrush)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Album,
+                contentDescription = null,
+                tint = NeonPinkLight,
+                modifier = Modifier.size(44.dp)
+            )
+        }
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                text = album.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = album.songCountLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = NeonPurple
+            )
         }
     }
 }

@@ -154,12 +154,15 @@ fun SongsScreen(
                 )
             }
         } else {
+            val onFilteredSongClick = remember(onSongClick, filteredSongs) {
+                { song: Song -> onSongClick(song, filteredSongs) }
+            }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 96.dp)
             ) {
                 // Actions Bar: Track count & Play/Shuffle buttons
-                item {
+                item(key = "songs_actions_header", contentType = "header") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -205,10 +208,10 @@ fun SongsScreen(
                         song = song,
                         isPlaying = isPlaying && currentSongId == song.id,
                         isFavorite = favoriteIds.contains(song.id),
-                        onSongClick = { onSongClick(song, filteredSongs) },
-                        onToggleFavorite = { onToggleFavorite(song.id) },
-                        onPlayNext = { onPlayNext(song) },
-                        onAddToQueue = { onAddToQueue(song) }
+                        onSongClick = onFilteredSongClick,
+                        onToggleFavorite = onToggleFavorite,
+                        onPlayNext = onPlayNext,
+                        onAddToQueue = onAddToQueue
                     )
                 }
             }

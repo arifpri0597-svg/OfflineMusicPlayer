@@ -47,9 +47,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -99,7 +101,6 @@ fun MiniPlayer(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
-                .clip(MiniPlayerShape)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -119,7 +120,7 @@ fun MiniPlayer(
                 .testTag("mini_player_overlay"),
             shape = MiniPlayerShape,
             tonalElevation = 8.dp,
-            shadowElevation = 12.dp,
+            shadowElevation = 8.dp,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.35f))
         ) {
@@ -194,30 +195,32 @@ private fun MiniPlayerProgressBar(
     fallbackProgress: Float,
     progressFlow: kotlinx.coroutines.flow.StateFlow<PlayerUiState>?
 ) {
-    if (progressFlow != null) {
-        val liveState = progressFlow.collectAsState()
-        LinearProgressIndicator(
-            progress = { liveState.value.progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .testTag("mini_player_progress"),
-            color = NeonPink,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            strokeCap = StrokeCap.Round
-        )
-    } else {
-        LinearProgressIndicator(
-            progress = { fallbackProgress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .testTag("mini_player_progress"),
-            color = NeonPink,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            strokeCap = StrokeCap.Round
-        )
-    }
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val liveState = progressFlow?.collectAsState()
+
+    Spacer(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .testTag("mini_player_progress")
+            .drawBehind {
+                val fraction = (liveState?.value?.progress ?: fallbackProgress).coerceIn(0f, 1f)
+                val r = size.height / 2f
+                val corner = CornerRadius(r, r)
+                drawRoundRect(
+                    color = trackColor,
+                    size = size,
+                    cornerRadius = corner
+                )
+                if (fraction > 0f) {
+                    drawRoundRect(
+                        color = NeonPink,
+                        size = Size(width = size.width * fraction, height = size.height),
+                        cornerRadius = corner
+                    )
+                }
+            }
+    )
 }
 
 @Composable
@@ -326,12 +329,8 @@ private fun MiniPlayerControls(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(40.dp)
+            .background(MiniPlayButtonBrush, CircleShape)
             .clip(CircleShape)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(NeonPink, NeonPurple)
-                )
-            )
             .clickable(onClick = onTogglePlayPause)
             .testTag("mini_player_play_pause_btn")
     ) {

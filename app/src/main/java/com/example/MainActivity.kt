@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestHighRefreshRateDisplayMode()
 
         val initialGranted = checkAudioPermission()
         viewModel.onPermissionResult(initialGranted)
@@ -168,10 +169,57 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        requestHighRefreshRateDisplayMode()
         if (isFinishing || isDestroyed || isPermissionRequestInFlight) return
         // Re-check permissions on resume (e.g., if user returned from Settings or permission dialog)
         val hasPermission = checkAudioPermission()
         viewModel.onPermissionResult(hasPermission)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            requestHighRefreshRateDisplayMode()
+        }
+    }
+
+    /**
+     * Explicitly requests the highest supported display refresh rate (e.g. 120Hz / 90Hz)
+     * matching the active physical resolution so Android OEM window managers do not cap
+     * scrolling at 60Hz.
+     */
+    private fun requestHighRefreshRateDisplayMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        try {
+            val activeDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay
+            } ?: return
+
+            val currentMode = activeDisplay.mode ?: return
+            val supportedModes = activeDisplay.supportedModes ?: return
+            val bestMode = supportedModes
+                .filter {
+                    it.physicalWidth == currentMode.physicalWidth &&
+                        it.physicalHeight == currentMode.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate }
+                ?: supportedModes.maxByOrNull { it.refreshRate }
+                ?: return
+
+            val params = window.attributes
+            if (params.preferredDisplayModeId != bestMode.modeId ||
+                params.preferredRefreshRate != bestMode.refreshRate
+            ) {
+                params.preferredDisplayModeId = bestMode.modeId
+                params.preferredRefreshRate = bestMode.refreshRate
+                window.attributes = params
+            }
+        } catch (_: Throwable) {
+            // Safe no-op on emulators or devices that restrict display mode changes
+        }
     }
 
     override fun onPause() {
@@ -234,6 +282,11 @@ private val BOTTOM_NAV_ITEMS = listOf(
     NavItem(NavigationTab.FOLDERS, "Folders", Icons.Default.Folder),
     NavItem(NavigationTab.SETTINGS, "Settings", Icons.Default.Settings)
 )
+
+private val BottomDividerColor = com.example.ui.theme.NeonPurple.copy(alpha = 0.2f)
+private val BottomNavContainerColor = androidx.compose.ui.graphics.Color(0xFF0E071B).copy(alpha = 0.96f)
+private val BottomNavIndicatorColor = com.example.ui.theme.NeonPink.copy(alpha = 0.18f)
+private val BottomNavUnselectedColor = androidx.compose.ui.graphics.Color(0xFFB3A4CC)
 
 @Composable
 fun PulseMusicAppRoot(
@@ -390,15 +443,22 @@ fun PulseMusicAppRoot(
                     // Slight top separation above simplified 5-tab Bottom Navigation Bar
                     androidx.compose.material3.HorizontalDivider(
                         thickness = 1.dp,
-                        color = com.example.ui.theme.NeonPurple.copy(alpha = 0.2f)
+                        color = BottomDividerColor
                     )
 
                     // Simplified 5-Tab Bottom Navigation Bar: [ Home ] [ Songs ] [ Albums ] [ Folders ] [ Settings ]
                     NavigationBar(
                         modifier = Modifier.testTag("bottom_nav_bar"),
-                        containerColor = androidx.compose.ui.graphics.Color(0xFF0E071B).copy(alpha = 0.96f),
+                        containerColor = BottomNavContainerColor,
                         tonalElevation = 0.dp
                     ) {
+                        val navItemColors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = com.example.ui.theme.NeonPink,
+                            selectedTextColor = com.example.ui.theme.NeonPink,
+                            indicatorColor = BottomNavIndicatorColor,
+                            unselectedIconColor = BottomNavUnselectedColor,
+                            unselectedTextColor = BottomNavUnselectedColor
+                        )
                         BOTTOM_NAV_ITEMS.forEach { item ->
                             val isSelected = libraryState.selectedTab == item.tab
                             NavigationBarItem(
@@ -418,13 +478,7 @@ fun PulseMusicAppRoot(
                                         style = MaterialTheme.typography.labelSmall
                                     )
                                 },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = com.example.ui.theme.NeonPink,
-                                    selectedTextColor = com.example.ui.theme.NeonPink,
-                                    indicatorColor = com.example.ui.theme.NeonPink.copy(alpha = 0.18f),
-                                    unselectedIconColor = androidx.compose.ui.graphics.Color(0xFFB3A4CC),
-                                    unselectedTextColor = androidx.compose.ui.graphics.Color(0xFFB3A4CC)
-                                ),
+                                colors = navItemColors,
                                 modifier = Modifier.testTag("nav_item_${item.label.lowercase()}")
                             )
                         }

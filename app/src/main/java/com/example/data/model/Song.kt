@@ -27,6 +27,11 @@ data class Song(
     val folderSuffix: String = if (folderName.isNotBlank()) " • $folderName" else ""
     val contentUriString: String = contentUri.toString()
     val albumArtUriString: String? = albumArtUri?.toString()?.takeIf { it.isNotBlank() }
+    val artworkSourceIdentity: String = if (albumArtUriString != null && albumArtUriString != contentUriString) {
+        "$albumArtUriString|$contentUriString"
+    } else {
+        contentUriString
+    }
 
     companion object {
         fun formatDurationMs(durationMs: Long): String {

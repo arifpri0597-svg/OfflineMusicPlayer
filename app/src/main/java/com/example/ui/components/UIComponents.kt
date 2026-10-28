@@ -77,6 +77,7 @@ private val SongRowShape = RoundedCornerShape(18.dp)
 private val SongThumbShape = RoundedCornerShape(14.dp)
 private val AlbumCardShape = RoundedCornerShape(20.dp)
 private val PlayingOverlayColor = Color.Black.copy(alpha = 0.45f)
+private val PlayingBorderColor = NeonPink.copy(alpha = 0.7f)
 
 private val SongThumbBrush = Brush.linearGradient(
     colors = listOf(
@@ -105,6 +106,37 @@ fun SongItemRow(
     song: Song,
     isPlaying: Boolean,
     isFavorite: Boolean,
+    onSongClick: (Song) -> Unit,
+    onToggleFavorite: (Long) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onAddToPlaylist: (Song) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val handleSongClick = remember(song, onSongClick) { { onSongClick(song) } }
+    val handleToggleFavorite = remember(song.id, onToggleFavorite) { { onToggleFavorite(song.id) } }
+    val handlePlayNext = remember(song, onPlayNext) { { onPlayNext(song) } }
+    val handleAddToQueue = remember(song, onAddToQueue) { { onAddToQueue(song) } }
+    val handleAddToPlaylist = remember(song, onAddToPlaylist) { { onAddToPlaylist(song) } }
+
+    SongItemRow(
+        song = song,
+        isPlaying = isPlaying,
+        isFavorite = isFavorite,
+        onSongClick = handleSongClick,
+        onToggleFavorite = handleToggleFavorite,
+        onPlayNext = handlePlayNext,
+        onAddToQueue = handleAddToQueue,
+        onAddToPlaylist = handleAddToPlaylist,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun SongItemRow(
+    song: Song,
+    isPlaying: Boolean,
+    isFavorite: Boolean,
     onSongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onPlayNext: () -> Unit,
@@ -113,17 +145,18 @@ fun SongItemRow(
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val colorScheme = MaterialTheme.colorScheme
 
     val cardBgColor = if (isPlaying) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        colorScheme.primaryContainer.copy(alpha = 0.55f)
     } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        colorScheme.surfaceVariant.copy(alpha = 0.45f)
     }
 
     val borderColor = if (isPlaying) {
-        NeonPink.copy(alpha = 0.7f)
+        PlayingBorderColor
     } else {
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+        colorScheme.outline.copy(alpha = 0.25f)
     }
 
     Row(
@@ -138,12 +171,12 @@ fun SongItemRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Album art thumbnail with neon gradient backdrop & synchronous LruCache
+        // Album art thumbnail with neon gradient backdrop & lock-free LruCache
         Box(
             modifier = Modifier
                 .size(52.dp)
-                .clip(SongThumbShape)
-                .background(SongThumbBrush),
+                .background(SongThumbBrush, SongThumbShape)
+                .clip(SongThumbShape),
             contentAlignment = Alignment.Center
         ) {
             FastArtworkImage(
@@ -190,7 +223,7 @@ fun SongItemRow(
                 text = song.title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
-                color = if (isPlaying) NeonPink else MaterialTheme.colorScheme.onSurface,
+                color = if (isPlaying) NeonPink else colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -199,7 +232,7 @@ fun SongItemRow(
                 Text(
                     text = song.artist,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -207,13 +240,13 @@ fun SongItemRow(
                 Text(
                     text = song.durationSuffix,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isPlaying) NeonPurple else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    color = if (isPlaying) NeonPurple else colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                 )
             }
         }
 
         // Favorite Button
-        val favColor = if (isFavorite) NeonPink else MaterialTheme.colorScheme.onSurfaceVariant
+        val favColor = if (isFavorite) NeonPink else colorScheme.onSurfaceVariant
         IconButton(
             onClick = onToggleFavorite,
             modifier = Modifier
@@ -239,7 +272,7 @@ fun SongItemRow(
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "Song options",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -281,59 +314,88 @@ fun SongItemRow(
 @Composable
 fun AlbumCard(
     album: Album,
+    onAlbumClick: (Album) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val handleClick = remember(album, onAlbumClick) { { onAlbumClick(album) } }
+    AlbumCard(
+        album = album,
+        onClick = handleClick,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun AlbumCard(
+    album: Album,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    val colorScheme = MaterialTheme.colorScheme
+    val containerColor = colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    val borderColor = colorScheme.outline.copy(alpha = 0.3f)
+
+    Column(
         modifier = modifier
             .fillMaxWidth()
+            .background(color = containerColor, shape = AlbumCardShape)
+            .border(width = 1.dp, color = borderColor, shape = AlbumCardShape)
+            .clip(AlbumCardShape)
             .clickable(onClick = onClick)
-            .testTag("album_card_${album.id}"),
-        shape = AlbumCardShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-        )
+            .testTag("album_card_${album.id}")
     ) {
-        Column {
-            FastArtworkImage(
-                artworkUri = album.artworkUriString ?: album.fallbackAudioUriString,
-                cacheKeyPrefix = "album",
-                sizePx = 256,
-                contentDescription = album.title,
-                fallbackUri = album.fallbackAudioUriString,
-                fallbackPath = album.fallbackAudioPath,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .background(AlbumPlaceholderBrush)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Album,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp),
-                    tint = NeonPink
-                )
-            }
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = album.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = album.tracksSubtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+        FastArtworkImage(
+            artworkUri = album.artworkUriString ?: album.fallbackAudioUriString,
+            cacheKeyPrefix = "album",
+            sizePx = 256,
+            contentDescription = album.title,
+            fallbackUri = album.fallbackAudioUriString,
+            fallbackPath = album.fallbackAudioPath,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(AlbumPlaceholderBrush)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Album,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = NeonPink
+            )
+        }
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = album.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = album.tracksSubtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
+}
+
+@Composable
+fun ArtistItemRow(
+    artist: Artist,
+    onArtistClick: (Artist) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val handleClick = remember(artist, onArtistClick) { { onArtistClick(artist) } }
+    ArtistItemRow(
+        artist = artist,
+        onClick = handleClick,
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -342,8 +404,9 @@ fun ArtistItemRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    val colorScheme = MaterialTheme.colorScheme
+    val bgColor = colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val borderColor = colorScheme.outline.copy(alpha = 0.25f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -380,7 +443,7 @@ fun ArtistItemRow(
             Text(
                 text = artist.subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = colorScheme.onSurfaceVariant
             )
         }
     }
@@ -389,11 +452,26 @@ fun ArtistItemRow(
 @Composable
 fun FolderItemRow(
     folder: Folder,
+    onFolderClick: (Folder) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val handleClick = remember(folder, onFolderClick) { { onFolderClick(folder) } }
+    FolderItemRow(
+        folder = folder,
+        onClick = handleClick,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun FolderItemRow(
+    folder: Folder,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    val colorScheme = MaterialTheme.colorScheme
+    val bgColor = colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val borderColor = colorScheme.outline.copy(alpha = 0.25f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -430,7 +508,7 @@ fun FolderItemRow(
             Text(
                 text = folder.subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = colorScheme.onSurfaceVariant
             )
         }
     }

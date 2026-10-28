@@ -17,6 +17,14 @@ data class Album(
     val stableKey: String = "${id}_${title}"
     val artworkUriString: String? = artworkUri?.toString()?.takeIf { it.isNotBlank() }
     val fallbackAudioUriString: String? = fallbackAudioUri?.toString()?.takeIf { it.isNotBlank() }
+    val artworkSourceIdentity: String = when {
+        artworkUriString != null && fallbackAudioUriString != null && artworkUriString != fallbackAudioUriString ->
+            "$artworkUriString|$fallbackAudioUriString"
+        artworkUriString != null -> artworkUriString
+        fallbackAudioUriString != null -> fallbackAudioUriString
+        fallbackAudioPath.isNotBlank() -> "file:${fallbackAudioPath.trim()}"
+        else -> ""
+    }
     val tracksSubtitle: String = "$artist • $songCount tracks"
     val songCountLabel: String = "$songCount songs"
 }

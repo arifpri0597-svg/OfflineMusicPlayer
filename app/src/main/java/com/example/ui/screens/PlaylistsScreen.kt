@@ -259,10 +259,10 @@ fun PlaylistsScreen(
                                 song = song,
                                 isPlaying = isPlaying && currentSongId == song.id,
                                 isFavorite = favoriteIds.contains(song.id),
-                                onSongClick = { onPlaylistSongClick(song) },
-                                onToggleFavorite = { onToggleFavorite(song.id) },
-                                onPlayNext = { onPlayNext(song) },
-                                onAddToQueue = { onAddToQueue(song) }
+                                onSongClick = onPlaylistSongClick,
+                                onToggleFavorite = onToggleFavorite,
+                                onPlayNext = onPlayNext,
+                                onAddToQueue = onAddToQueue
                             )
                         }
 

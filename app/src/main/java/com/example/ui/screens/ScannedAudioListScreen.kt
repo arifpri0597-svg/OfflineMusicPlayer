@@ -365,11 +365,11 @@ fun ScannedAudioListScreen(
                             song = song,
                             isPlaying = isCurrentPlaying,
                             isFavorite = isFavorite,
-                            onSongClick = { onScannedSongClick(song) },
-                            onToggleFavorite = { onToggleFavorite(song.id) },
-                            onPlayNext = { onPlayNext(song) },
-                            onAddToQueue = { onAddToQueue(song) },
-                            onAddToPlaylist = { onAddToPlaylist(song) }
+                            onSongClick = onScannedSongClick,
+                            onToggleFavorite = onToggleFavorite,
+                            onPlayNext = onPlayNext,
+                            onAddToQueue = onAddToQueue,
+                            onAddToPlaylist = onAddToPlaylist
                         )
                     }
                 }
@@ -386,16 +386,20 @@ private fun ScannedAudioItemRow(
     song: Song,
     isPlaying: Boolean,
     isFavorite: Boolean,
-    onSongClick: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
-    onAddToPlaylist: () -> Unit = {},
+    onSongClick: (Song) -> Unit,
+    onToggleFavorite: (Long) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onAddToPlaylist: (Song) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val handleSongClick = remember(song, onSongClick) { { onSongClick(song) } }
+    val handleToggleFavorite = remember(song.id, onToggleFavorite) { { onToggleFavorite(song.id) } }
+
+    val colorScheme = MaterialTheme.colorScheme
     val rowBgColor = if (isPlaying) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        colorScheme.primaryContainer.copy(alpha = 0.3f)
     } else {
         Color.Transparent
     }
@@ -404,12 +408,12 @@ private fun ScannedAudioItemRow(
         modifier = modifier
             .fillMaxWidth()
             .background(rowBgColor)
-            .clickable(onClick = onSongClick)
+            .clickable(onClick = handleSongClick)
             .testTag("scanned_audio_row_${song.id}")
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Artwork / Thumbnail with synchronous LruCache & negative URI cache
+        // Artwork / Thumbnail with lock-free LruCache & negative URI cache
         com.example.ui.components.FastArtworkImage(
             artworkUri = song.albumArtUriString ?: song.contentUriString,
             cacheKeyPrefix = "thumb",
@@ -419,110 +423,110 @@ private fun ScannedAudioItemRow(
             fallbackPath = song.path,
             modifier = Modifier
                 .size(50.dp)
+                .background(colorScheme.surfaceVariant, ScannedThumbShape)
                 .clip(ScannedThumbShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Icon(
                 imageVector = Icons.Default.Audiotrack,
                 contentDescription = null,
-                tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isPlaying) colorScheme.primary else colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(26.dp)
             )
         }
 
-            Spacer(modifier = Modifier.width(14.dp))
+        Spacer(modifier = Modifier.width(14.dp))
 
-            // Metadata Column
-            Column(modifier = Modifier.weight(1f)) {
+        // Metadata Column
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
+                color = if (isPlaying) colorScheme.primary else colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = song.artistAlbumSubtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = song.formattedDuration,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = song.artistAlbumSubtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.folderSuffix.isNotEmpty()) {
                     Text(
-                        text = song.formattedDuration,
+                        text = song.folderSuffix,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = colorScheme.onSurfaceVariant
                     )
-                    if (song.folderSuffix.isNotEmpty()) {
-                        Text(
-                            text = song.folderSuffix,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            // Favorite Button
-            IconButton(
-                onClick = onToggleFavorite,
-                modifier = Modifier.testTag("scanned_audio_fav_${song.id}")
-            ) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = if (isFavorite) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Overflow Options Menu (only compose DropdownMenu popup when open)
-            Box {
-                IconButton(
-                    onClick = { menuOpen = true },
-                    modifier = Modifier.testTag("scanned_audio_menu_${song.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "More actions",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (menuOpen) {
-                    DropdownMenu(
-                        expanded = true,
-                        onDismissRequest = { menuOpen = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Play Next") },
-                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                            onClick = {
-                                menuOpen = false
-                                onPlayNext()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to Queue") },
-                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
-                            onClick = {
-                                menuOpen = false
-                                onAddToQueue()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to Playlist") },
-                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
-                            onClick = {
-                                menuOpen = false
-                                onAddToPlaylist()
-                            }
-                        )
-                    }
                 }
             }
         }
+
+        // Favorite Button
+        IconButton(
+            onClick = handleToggleFavorite,
+            modifier = Modifier.testTag("scanned_audio_fav_${song.id}")
+        ) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                contentDescription = "Favorite",
+                tint = if (isFavorite) colorScheme.tertiary else colorScheme.onSurfaceVariant
+            )
+        }
+
+        // Overflow Options Menu (only compose DropdownMenu popup when open)
+        Box {
+            IconButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.testTag("scanned_audio_menu_${song.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More actions",
+                    tint = colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (menuOpen) {
+                DropdownMenu(
+                    expanded = true,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Play Next") },
+                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                        onClick = {
+                            menuOpen = false
+                            onPlayNext(song)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to Queue") },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                        onClick = {
+                            menuOpen = false
+                            onAddToQueue(song)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to Playlist") },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                        onClick = {
+                            menuOpen = false
+                            onAddToPlaylist(song)
+                        }
+                    )
+                }
+            }
+        }
+    }
 }

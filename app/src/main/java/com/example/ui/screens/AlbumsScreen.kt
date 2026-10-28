@@ -71,7 +71,6 @@ fun AlbumsScreen(
     onAddToPlaylist: (Song) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     if (selectedAlbum != null) {
         BackHandler {
             onAlbumSelect(null)
@@ -196,11 +195,11 @@ fun AlbumsScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = favoriteIds.contains(song.id),
-                    onSongClick = { onAlbumSongClick(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onPlayNext = { onPlayNext(song) },
-                    onAddToQueue = { onAddToQueue(song) },
-                    onAddToPlaylist = { onAddToPlaylist(song) }
+                    onSongClick = onAlbumSongClick,
+                    onToggleFavorite = onToggleFavorite,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist
                 )
             }
         }
@@ -229,7 +228,7 @@ fun AlbumsScreen(
                 ) { album ->
                     AlbumCard(
                         album = album,
-                        onClick = { onAlbumSelect(album) }
+                        onAlbumClick = onAlbumSelect
                     )
                 }
             }

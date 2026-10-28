@@ -138,11 +138,11 @@ fun FavoritesScreen(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
                     isFavorite = true,
-                    onSongClick = { onFavoriteSongClick(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onPlayNext = { onPlayNext(song) },
-                    onAddToQueue = { onAddToQueue(song) },
-                    onAddToPlaylist = { onAddToPlaylist(song) }
+                    onSongClick = onFavoriteSongClick,
+                    onToggleFavorite = onToggleFavorite,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist
                 )
             }
         }
