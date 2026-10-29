@@ -124,6 +124,7 @@ private val HomeAlbumBackdropBrush = Brush.linearGradient(
 
 private val ActionButtonShape = RoundedCornerShape(18.dp)
 private val HomeAlbumCardShape = RoundedCornerShape(20.dp)
+private val HomeAlbumCardCoverShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
 private val QuickAccessPillShape = RoundedCornerShape(16.dp)
 
 @Composable
@@ -229,10 +230,21 @@ fun HomeScreen(
         }
     } else {
         val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val homeVisibleSongs = remember(favoritesPreview, filteredAllTracks, searchQuery) {
+            if (searchQuery.isBlank() && favoritesPreview.isNotEmpty()) {
+                val combined = ArrayList<Song>(favoritesPreview.size + filteredAllTracks.size)
+                combined.addAll(favoritesPreview)
+                combined.addAll(filteredAllTracks)
+                combined
+            } else {
+                filteredAllTracks
+            }
+        }
         com.example.ui.components.LazyListSongArtworkPreloader(
             listState = homeListState,
-            songs = filteredAllTracks,
-            headerItemCount = 3
+            songs = homeVisibleSongs,
+            preloadAheadCount = 15,
+            headerItemCount = 2
         )
         LazyColumn(
             state = homeListState,
@@ -832,7 +844,6 @@ private fun HomeAlbumCard(
             .width(142.dp)
             .background(color = containerColor, shape = HomeAlbumCardShape)
             .border(width = 1.dp, color = borderColor, shape = HomeAlbumCardShape)
-            .clip(HomeAlbumCardShape)
             .clickable(onClick = handleClick)
     ) {
         com.example.ui.components.FastArtworkImage(
@@ -845,9 +856,10 @@ private fun HomeAlbumCard(
             precomputedIdentity = album.artworkSourceIdentity,
             precomputedCacheKey = album.albumCacheKey,
             precomputedPrimaryCacheKey = album.primaryAlbumCacheKey,
+            imageClipShape = HomeAlbumCardCoverShape,
             modifier = Modifier
                 .size(142.dp)
-                .background(HomeAlbumBackdropBrush)
+                .background(HomeAlbumBackdropBrush, HomeAlbumCardCoverShape)
         ) {
             Icon(
                 imageVector = Icons.Default.Album,

@@ -141,7 +141,7 @@ fun ArtistsScreen(
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
-                    isFavorite = favoriteIds.contains(song.id),
+                    isFavorite = song.isFavorite || (favoriteIds.isNotEmpty() && favoriteIds.contains(song.id)),
                     onSongClick = onArtistSongClick,
                     onToggleFavorite = onToggleFavorite,
                     onPlayNext = onPlayNext,
@@ -279,7 +279,7 @@ fun FoldersScreen(
                 SongItemRow(
                     song = song,
                     isPlaying = isPlaying && currentSongId == song.id,
-                    isFavorite = favoriteIds.contains(song.id),
+                    isFavorite = song.isFavorite || (favoriteIds.isNotEmpty() && favoriteIds.contains(song.id)),
                     onSongClick = onFolderSongClick,
                     onToggleFavorite = onToggleFavorite,
                     onPlayNext = onPlayNext,

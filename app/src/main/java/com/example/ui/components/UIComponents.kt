@@ -319,6 +319,8 @@ fun SongItemRow(
     )
 }
 
+private val AlbumCardCoverShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+
 @Composable
 fun AlbumCard(
     album: Album,
@@ -335,7 +337,6 @@ fun AlbumCard(
             .fillMaxWidth()
             .background(color = containerColor, shape = AlbumCardShape)
             .border(width = 1.dp, color = borderColor, shape = AlbumCardShape)
-            .clip(AlbumCardShape)
             .clickable(onClick = handleClick)
             .testTag("album_card_${album.id}")
     ) {
@@ -349,10 +350,11 @@ fun AlbumCard(
             precomputedIdentity = album.artworkSourceIdentity,
             precomputedCacheKey = album.albumCacheKey,
             precomputedPrimaryCacheKey = album.primaryAlbumCacheKey,
+            imageClipShape = AlbumCardCoverShape,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .background(AlbumPlaceholderBrush)
+                .background(AlbumPlaceholderBrush, AlbumCardCoverShape)
         ) {
             Icon(
                 imageVector = Icons.Default.Album,

@@ -304,6 +304,12 @@ fun ScannedAudioListScreen(
                     songs = filteredAndSortedSongs,
                     headerItemCount = 1
                 )
+                val onPlayAllClick = remember(onPlayAll, filteredAndSortedSongs) {
+                    { onPlayAll(filteredAndSortedSongs) }
+                }
+                val onShuffleAllClick = remember(onShuffleAll, filteredAndSortedSongs) {
+                    { onShuffleAll(filteredAndSortedSongs) }
+                }
                 // Main LazyColumn
                 LazyColumn(
                     state = listState,
@@ -321,7 +327,7 @@ fun ScannedAudioListScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Button(
-                                onClick = { onPlayAll(filteredAndSortedSongs) },
+                                onClick = onPlayAllClick,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -331,7 +337,7 @@ fun ScannedAudioListScreen(
                             }
 
                             OutlinedButton(
-                                onClick = { onShuffleAll(filteredAndSortedSongs) },
+                                onClick = onShuffleAllClick,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -349,7 +355,7 @@ fun ScannedAudioListScreen(
                         contentType = { "scanned_song" }
                     ) { song ->
                         val isCurrentPlaying = isPlaying && currentPlayingSongId == song.id
-                        val isFavorite = favoriteIds.contains(song.id)
+                        val isFavorite = song.isFavorite || (favoriteIds.isNotEmpty() && favoriteIds.contains(song.id))
 
                         ScannedAudioItemRow(
                             song = song,
@@ -367,8 +373,11 @@ fun ScannedAudioListScreen(
         }
 
         if (filteredAndSortedSongs.isNotEmpty()) {
+            val onFabShuffleClick = remember(onShuffleAll, filteredAndSortedSongs) {
+                { onShuffleAll(filteredAndSortedSongs) }
+            }
             FloatingActionButton(
-                onClick = { onShuffleAll(filteredAndSortedSongs) },
+                onClick = onFabShuffleClick,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 shape = CircleShape,

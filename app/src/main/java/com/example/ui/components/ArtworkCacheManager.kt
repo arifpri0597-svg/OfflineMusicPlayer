@@ -555,7 +555,7 @@ object ArtworkCacheManager {
 
         // 0. Check two-tier disk thumbnail cache first (Glide DiskCacheStrategy.RESOURCE equivalent)
         if (artworkBytes == null || artworkBytes.isEmpty()) {
-            val diskBitmap = (if (primaryCacheKey != null && !missingPrimaryOnlyUris.contains(cleanPrimary)) {
+            val diskBitmap = (if (primaryCacheKey != null) {
                 readDiskCachedThumbnail(appContext, primaryCacheKey)
             } else null) ?: readDiskCachedThumbnail(appContext, cacheKey)
 
@@ -1113,8 +1113,9 @@ object ArtworkCacheManager {
  * Reusable, zero-jank album artwork composable for list rows, album grids, mini player, and hero art.
  * - Immediately renders cached [ImageBitmap] or known-missing fallback synchronously on the first
  *   composition frame with ZERO `remember`, ZERO `MutableState`, and ZERO `LaunchedEffect` allocations.
- * - Debounces background I/O by 55ms for list/grid thumbnails (`sizePx <= 256`) so items flung past
- *   the viewport during 120Hz scrolling cancel before starting any ContentResolver IPC or MediaMetadataRetriever work.
+ * - Debounces background I/O by 55ms for list/grid thumbnails (`sizePx <= 256`) and waits while active
+ *   scrolling is in progress so items flung past the viewport during 120Hz scrolling cancel before
+ *   starting any ContentResolver IPC, MediaMetadataRetriever work, or mid-scroll state mutations.
  */
 @Composable
 fun FastArtworkImage(
@@ -1261,10 +1262,13 @@ fun FastArtworkImage(
 
     val context = LocalContext.current
     LaunchedEffect(key, bHash) {
-        // For list/grid thumbnails (<= 256px), wait for fling-settle debounce before touching ContentResolver/disk I/O.
-        // During a fast fling, items fly past and cancel here with ZERO I/O or recomposition!
+        // For list/grid thumbnails (<= 256px), wait for fling-settle debounce and active scroll completion
+        // before touching ContentResolver/disk I/O or mutating state during 120Hz scrolling.
         if (bucket <= 256) {
             delay(ArtworkCacheManager.getFlingDebounceMs())
+            while (ArtworkCacheManager.isScrollingActive()) {
+                delay(48L)
+            }
         }
         val decoded = ArtworkCacheManager.loadOrDecodeArtwork(
             context = context,
@@ -1306,9 +1310,9 @@ fun FastArtworkImage(
 
 /**
  * Scroll-idle lookahead artwork preloader for [LazyListState].
- * - Reports active scroll state to [ArtworkCacheManager] so background jobs yield during 120Hz flings.
- * - Never executes work on the Main Thread during active scrolling; only prewarms upcoming items
- *   on `Dispatchers.Default` / `prewarmDispatcher` after scrolling settles.
+ * - Observes `isScrollInProgress` ONLY via `snapshotFlow` inside a coroutine so scroll start/stop
+ *   never triggers `@Composable` recomposition or per-item `collectLatest` cancellation during a fling.
+ * - Only prewarms upcoming items on `Dispatchers.Default` / `prewarmDispatcher` after scrolling settles.
  */
 @Composable
 fun LazyListSongArtworkPreloader(
@@ -1317,63 +1321,71 @@ fun LazyListSongArtworkPreloader(
     preloadAheadCount: Int = 10,
     headerItemCount: Int = 1
 ) {
-    val isScrolling = listState.isScrollInProgress
-    DisposableEffect(isScrolling) {
-        if (isScrolling) {
-            ArtworkCacheManager.onScrollStart()
-        }
-        onDispose {
-            if (isScrolling) {
-                ArtworkCacheManager.onScrollStop()
-            }
-        }
-    }
-
     if (songs.isEmpty()) return
     val context = LocalContext.current
     LaunchedEffect(listState, songs) {
-        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collectLatest { (scrolling, firstVisible) ->
-                if (scrolling) return@collectLatest
-                delay(80L)
-                val slice = withContext(Dispatchers.Default) {
-                    val startSongIndex = (firstVisible - headerItemCount).coerceAtLeast(0)
-                    val endSongIndex = (startSongIndex + preloadAheadCount + 6).coerceAtMost(songs.size)
-                    if (startSongIndex >= endSongIndex) return@withContext emptyList()
-                    val seenPrimary = HashSet<String>(endSongIndex - startSongIndex)
-                    val list = ArrayList<Triple<String?, String?, String?>>(endSongIndex - startSongIndex)
-                    for (i in startSongIndex until endSongIndex) {
-                        val s = songs[i]
-                        val dedupKey = s.albumArtUriString ?: s.contentUriString
-                        if (!seenPrimary.add(dedupKey)) continue
-                        if (ArtworkCacheManager.getFastExactBitmap(s.primaryThumbCacheKey, s.thumbCacheKey) == null &&
-                            !ArtworkCacheManager.isSourceKnownMissing(
-                                primaryUri = s.albumArtUriString,
-                                fallbackUri = s.contentUriString,
-                                fallbackPath = s.path,
-                                precomputedIdentity = s.artworkSourceIdentity,
-                                sizePx = 144
-                            )
-                        ) {
-                            list.add(Triple(s.albumArtUriString, s.contentUriString, s.path))
+        var markedScrolling = false
+        try {
+            snapshotFlow { listState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collectLatest { scrolling ->
+                    if (scrolling) {
+                        if (!markedScrolling) {
+                            markedScrolling = true
+                            ArtworkCacheManager.onScrollStart()
                         }
+                        return@collectLatest
                     }
-                    list
+                    if (markedScrolling) {
+                        markedScrolling = false
+                        ArtworkCacheManager.onScrollStop()
+                    }
+                    delay(80L)
+                    val firstVisible = listState.firstVisibleItemIndex
+                    val slice = withContext(Dispatchers.Default) {
+                        val startSongIndex = (firstVisible - headerItemCount).coerceAtLeast(0)
+                        val endSongIndex = (startSongIndex + preloadAheadCount + 8).coerceAtMost(songs.size)
+                        if (startSongIndex >= endSongIndex) return@withContext emptyList()
+                        val seenPrimary = HashSet<String>(endSongIndex - startSongIndex)
+                        val list = ArrayList<Triple<String?, String?, String?>>(endSongIndex - startSongIndex)
+                        for (i in startSongIndex until endSongIndex) {
+                            val s = songs[i]
+                            val dedupKey = s.albumArtUriString ?: s.contentUriString
+                            if (!seenPrimary.add(dedupKey)) continue
+                            if (ArtworkCacheManager.getFastExactBitmap(s.primaryThumbCacheKey, s.thumbCacheKey) == null &&
+                                !ArtworkCacheManager.isSourceKnownMissing(
+                                    primaryUri = s.albumArtUriString,
+                                    fallbackUri = s.contentUriString,
+                                    fallbackPath = s.path,
+                                    precomputedIdentity = s.artworkSourceIdentity,
+                                    sizePx = 144
+                                )
+                            ) {
+                                list.add(Triple(s.albumArtUriString, s.contentUriString, s.path))
+                            }
+                        }
+                        list
+                    }
+                    if (slice.isNotEmpty()) {
+                        ArtworkCacheManager.prewarmArtworkSources(
+                            context = context,
+                            sources = slice,
+                            sizePx = 144
+                        )
+                    }
                 }
-                if (slice.isNotEmpty()) {
-                    ArtworkCacheManager.prewarmArtworkSources(
-                        context = context,
-                        sources = slice,
-                        sizePx = 144
-                    )
-                }
+        } finally {
+            if (markedScrolling) {
+                ArtworkCacheManager.onScrollStop()
             }
+        }
     }
 }
 
 /**
  * Scroll-idle lookahead artwork preloader for [LazyGridState] album grids.
+ * - Observes `isScrollInProgress` ONLY via `snapshotFlow` inside a coroutine so scroll start/stop
+ *   never triggers `@Composable` recomposition or per-item `collectLatest` cancellation during a fling.
  */
 @Composable
 fun LazyGridAlbumArtworkPreloader(
@@ -1381,54 +1393,60 @@ fun LazyGridAlbumArtworkPreloader(
     albums: List<Album>,
     preloadAheadCount: Int = 8
 ) {
-    val isScrolling = gridState.isScrollInProgress
-    DisposableEffect(isScrolling) {
-        if (isScrolling) {
-            ArtworkCacheManager.onScrollStart()
-        }
-        onDispose {
-            if (isScrolling) {
-                ArtworkCacheManager.onScrollStop()
-            }
-        }
-    }
-
     if (albums.isEmpty()) return
     val context = LocalContext.current
     LaunchedEffect(gridState, albums) {
-        snapshotFlow { gridState.isScrollInProgress to gridState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collectLatest { (scrolling, firstVisible) ->
-                if (scrolling) return@collectLatest
-                delay(80L)
-                val slice = withContext(Dispatchers.Default) {
-                    val startIdx = firstVisible.coerceAtLeast(0)
-                    val endIdx = (startIdx + preloadAheadCount + 4).coerceAtMost(albums.size)
-                    if (startIdx >= endIdx) return@withContext emptyList()
-                    val list = ArrayList<Triple<String?, String?, String?>>(endIdx - startIdx)
-                    for (i in startIdx until endIdx) {
-                        val a = albums[i]
-                        if (ArtworkCacheManager.getFastExactBitmap(a.primaryAlbumCacheKey, a.albumCacheKey) == null &&
-                            !ArtworkCacheManager.isSourceKnownMissing(
-                                primaryUri = a.artworkUriString,
-                                fallbackUri = a.fallbackAudioUriString,
-                                fallbackPath = a.fallbackAudioPath,
-                                precomputedIdentity = a.artworkSourceIdentity,
-                                sizePx = 256
-                            )
-                        ) {
-                            list.add(Triple(a.artworkUriString, a.fallbackAudioUriString, a.fallbackAudioPath))
+        var markedScrolling = false
+        try {
+            snapshotFlow { gridState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collectLatest { scrolling ->
+                    if (scrolling) {
+                        if (!markedScrolling) {
+                            markedScrolling = true
+                            ArtworkCacheManager.onScrollStart()
                         }
+                        return@collectLatest
                     }
-                    list
+                    if (markedScrolling) {
+                        markedScrolling = false
+                        ArtworkCacheManager.onScrollStop()
+                    }
+                    delay(80L)
+                    val firstVisible = gridState.firstVisibleItemIndex
+                    val slice = withContext(Dispatchers.Default) {
+                        val startIdx = firstVisible.coerceAtLeast(0)
+                        val endIdx = (startIdx + preloadAheadCount + 6).coerceAtMost(albums.size)
+                        if (startIdx >= endIdx) return@withContext emptyList()
+                        val list = ArrayList<Triple<String?, String?, String?>>(endIdx - startIdx)
+                        for (i in startIdx until endIdx) {
+                            val a = albums[i]
+                            if (ArtworkCacheManager.getFastExactBitmap(a.primaryAlbumCacheKey, a.albumCacheKey) == null &&
+                                !ArtworkCacheManager.isSourceKnownMissing(
+                                    primaryUri = a.artworkUriString,
+                                    fallbackUri = a.fallbackAudioUriString,
+                                    fallbackPath = a.fallbackAudioPath,
+                                    precomputedIdentity = a.artworkSourceIdentity,
+                                    sizePx = 256
+                                )
+                            ) {
+                                list.add(Triple(a.artworkUriString, a.fallbackAudioUriString, a.fallbackAudioPath))
+                            }
+                        }
+                        list
+                    }
+                    if (slice.isNotEmpty()) {
+                        ArtworkCacheManager.prewarmArtworkSources(
+                            context = context,
+                            sources = slice,
+                            sizePx = 256
+                        )
+                    }
                 }
-                if (slice.isNotEmpty()) {
-                    ArtworkCacheManager.prewarmArtworkSources(
-                        context = context,
-                        sources = slice,
-                        sizePx = 256
-                    )
-                }
+        } finally {
+            if (markedScrolling) {
+                ArtworkCacheManager.onScrollStop()
             }
+        }
     }
 }

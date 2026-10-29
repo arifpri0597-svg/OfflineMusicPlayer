@@ -214,7 +214,7 @@ fun SongsScreen(
                     SongItemRow(
                         song = song,
                         isPlaying = isPlaying && currentSongId == song.id,
-                        isFavorite = favoriteIds.contains(song.id),
+                        isFavorite = song.isFavorite || (favoriteIds.isNotEmpty() && favoriteIds.contains(song.id)),
                         onSongClick = onFilteredSongClick,
                         onToggleFavorite = onToggleFavorite,
                         onPlayNext = onPlayNext,
