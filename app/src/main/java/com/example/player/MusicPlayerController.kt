@@ -1334,6 +1334,10 @@ class MusicPlayerController(
         progressJob?.cancel()
         progressJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
+                if (com.example.ui.components.ArtworkCacheManager.isScrollingActive()) {
+                    delay(200L)
+                    continue
+                }
                 val player = controller
                 if (player != null && player.isPlaying) {
                     val pos = resolveEffectivePosition(player)
@@ -1357,8 +1361,7 @@ class MusicPlayerController(
                         )
                     }
                 }
-                val pollDelayMs = if (com.example.ui.components.ArtworkCacheManager.isScrollingActive()) 500L else 200L
-                delay(pollDelayMs)
+                delay(200L)
             }
         }
     }

@@ -127,6 +127,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
 
     val rootPlaybackSummary: StateFlow<RootPlaybackSummary> = playerUiState
+        .distinctUntilChanged { old, new ->
+            old.currentSong?.id == new.currentSong?.id &&
+                old.isPlaying == new.isPlaying &&
+                (old.currentSong != null) == (new.currentSong != null) &&
+                old.errorMessage == new.errorMessage
+        }
         .map { state ->
             RootPlaybackSummary(
                 currentSongId = state.currentSong?.id,
@@ -135,7 +141,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = state.errorMessage
             )
         }
-        .distinctUntilChanged()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -285,11 +290,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                     )
                                 }
 
-                                // Prewarm initial visible thumbnails on background thread (deduplicated by album)
+                                // Prewarm initial visible & upcoming thumbnails on background thread (deduplicated by album)
                                 launch(Dispatchers.IO) {
                                     val thumbSources = songsList.asSequence()
                                         .distinctBy { it.albumArtUriString ?: it.contentUriString }
-                                        .take(16)
+                                        .take(60)
                                         .map { Triple(it.albumArtUriString, it.contentUriString, it.path) }
                                         .toList()
                                     com.example.ui.components.ArtworkCacheManager.prewarmArtworkSources(
@@ -298,7 +303,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                         sizePx = 144
                                     )
                                     val albumSources = albums.asSequence()
-                                        .take(12)
+                                        .take(30)
                                         .map { Triple(it.artworkUriString, it.fallbackAudioUriString, it.fallbackAudioPath) }
                                         .toList()
                                     com.example.ui.components.ArtworkCacheManager.prewarmArtworkSources(

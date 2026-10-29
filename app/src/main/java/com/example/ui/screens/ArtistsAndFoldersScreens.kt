@@ -159,7 +159,10 @@ fun ArtistsScreen(
                 modifier = modifier.fillMaxSize()
             )
         } else {
+            val artistsListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            com.example.ui.components.LazyListScrollStateTracker(artistsListState)
             LazyColumn(
+                state = artistsListState,
                 modifier = modifier
                     .fillMaxSize()
                     .testTag("artists_list"),
@@ -297,7 +300,10 @@ fun FoldersScreen(
                 modifier = modifier.fillMaxSize()
             )
         } else {
+            val foldersListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            com.example.ui.components.LazyListScrollStateTracker(foldersListState)
             LazyColumn(
+                state = foldersListState,
                 modifier = modifier
                     .fillMaxSize()
                     .testTag("folders_list"),

@@ -436,7 +436,10 @@ fun HomeScreen(
                         )
                     }
 
+                    val albumsRowState = androidx.compose.foundation.lazy.rememberLazyListState()
+                    com.example.ui.components.LazyListScrollStateTracker(albumsRowState)
                     LazyRow(
+                        state = albumsRowState,
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {

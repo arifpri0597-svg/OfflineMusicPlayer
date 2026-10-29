@@ -204,11 +204,12 @@ fun SongItemRow(
             }
         }
 
-        Spacer(modifier = Modifier.width(14.dp))
-
-        // Title & Artist (flattened to 2 Text nodes without nested weight Row double-measurement)
+        // Title & Artist (flattened to 2 Text nodes without Spacer LayoutNodes)
         Column(
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Text(
                 text = song.title,
@@ -218,7 +219,6 @@ fun SongItemRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = song.artistDurationSubtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -363,7 +363,10 @@ fun AlbumCard(
                 tint = NeonPink
             )
         }
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = album.title,
                 style = MaterialTheme.typography.titleSmall,
@@ -372,7 +375,6 @@ fun AlbumCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = album.tracksSubtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -431,14 +433,17 @@ fun ArtistItemRow(
                 modifier = Modifier.size(26.dp)
             )
         }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = artist.name,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = artist.subtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -495,14 +500,17 @@ fun FolderItemRow(
                 modifier = Modifier.size(24.dp)
             )
         }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = folder.name,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = folder.subtitle,
                 style = MaterialTheme.typography.bodySmall,

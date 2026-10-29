@@ -1136,28 +1136,20 @@ fun FastArtworkImage(
 ) {
     val hasBytes = artworkBytes != null && artworkBytes.isNotEmpty()
     val bucket = ArtworkCacheManager.bucketSizeFor(sizePx)
+    val hasPrecomputedKeys = !hasBytes &&
+        (!precomputedPrimaryCacheKey.isNullOrEmpty() || !precomputedCacheKey.isNullOrEmpty())
 
     // 1. Ultra-fast zero-allocation synchronous check for precomputed list/grid items
-    if (!hasBytes && (!precomputedPrimaryCacheKey.isNullOrEmpty() || !precomputedCacheKey.isNullOrEmpty())) {
+    if (hasPrecomputedKeys) {
         val exactCached = ArtworkCacheManager.getFastExactBitmap(precomputedPrimaryCacheKey, precomputedCacheKey)
         if (exactCached != null) {
-            Box(
-                modifier = modifier,
-                contentAlignment = Alignment.Center
-            ) {
-                val imgModifier = if (imageClipShape != null) {
-                    Modifier.fillMaxSize().clip(imageClipShape)
-                } else {
-                    Modifier.fillMaxSize()
-                }
-                Image(
-                    bitmap = exactCached,
-                    contentDescription = contentDescription,
-                    modifier = imgModifier,
-                    contentScale = contentScale,
-                    filterQuality = FilterQuality.Low
-                )
-            }
+            Image(
+                bitmap = exactCached,
+                contentDescription = contentDescription,
+                modifier = if (imageClipShape != null) modifier.clip(imageClipShape) else modifier,
+                contentScale = contentScale,
+                filterQuality = FilterQuality.Low
+            )
             return
         }
 
@@ -1180,9 +1172,54 @@ fun FastArtworkImage(
             }
             return
         }
+
+        val key = precomputedCacheKey ?: precomputedPrimaryCacheKey ?: ""
+        var asyncBitmap by remember(key) {
+            mutableStateOf<ImageBitmap?>(null)
+        }
+        val context = LocalContext.current
+        LaunchedEffect(key) {
+            if (bucket <= 256) {
+                delay(ArtworkCacheManager.getFlingDebounceMs())
+                while (ArtworkCacheManager.isScrollingActive()) {
+                    delay(48L)
+                }
+            }
+            val decoded = ArtworkCacheManager.loadOrDecodeArtwork(
+                context = context,
+                primaryUri = primaryStr,
+                fallbackUri = fallbackStr,
+                fallbackPath = fallbackPath,
+                artworkBytes = null,
+                sizePx = bucket,
+                isPrewarm = false
+            )
+            if (decoded != null && asyncBitmap !== decoded) {
+                asyncBitmap = decoded
+            }
+        }
+
+        val bitmap = asyncBitmap
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = contentDescription,
+                modifier = if (imageClipShape != null) modifier.clip(imageClipShape) else modifier,
+                contentScale = contentScale,
+                filterQuality = FilterQuality.Low
+            )
+        } else {
+            Box(
+                modifier = modifier,
+                contentAlignment = Alignment.Center
+            ) {
+                fallback()
+            }
+        }
+        return
     }
 
-    // 2. General lookup for uncached items or Now Playing hero art
+    // 2. General lookup for non-precomputed items or Now Playing hero art
     val primaryStr = when (artworkUri) {
         null -> null
         is String -> artworkUri.takeIf { it.isNotBlank() }
@@ -1232,24 +1269,19 @@ fun FastArtworkImage(
     val needsAsyncDecode = !isExact && !missing && identity.isNotEmpty()
 
     if (!needsAsyncDecode) {
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-            if (initialBitmap != null) {
-                val imgModifier = if (imageClipShape != null) {
-                    Modifier.fillMaxSize().clip(imageClipShape)
-                } else {
-                    Modifier.fillMaxSize()
-                }
-                Image(
-                    bitmap = initialBitmap,
-                    contentDescription = contentDescription,
-                    modifier = imgModifier,
-                    contentScale = contentScale,
-                    filterQuality = FilterQuality.Low
-                )
-            } else {
+        if (initialBitmap != null) {
+            Image(
+                bitmap = initialBitmap,
+                contentDescription = contentDescription,
+                modifier = if (imageClipShape != null) modifier.clip(imageClipShape) else modifier,
+                contentScale = contentScale,
+                filterQuality = FilterQuality.Low
+            )
+        } else {
+            Box(
+                modifier = modifier,
+                contentAlignment = Alignment.Center
+            ) {
                 fallback()
             }
         }
@@ -1262,8 +1294,6 @@ fun FastArtworkImage(
 
     val context = LocalContext.current
     LaunchedEffect(key, bHash) {
-        // For list/grid thumbnails (<= 256px), wait for fling-settle debounce and active scroll completion
-        // before touching ContentResolver/disk I/O or mutating state during 120Hz scrolling.
         if (bucket <= 256) {
             delay(ArtworkCacheManager.getFlingDebounceMs())
             while (ArtworkCacheManager.isScrollingActive()) {
@@ -1284,25 +1314,20 @@ fun FastArtworkImage(
         }
     }
 
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
-    ) {
-        val bitmap = asyncBitmap
-        if (bitmap != null) {
-            val imgModifier = if (imageClipShape != null) {
-                Modifier.fillMaxSize().clip(imageClipShape)
-            } else {
-                Modifier.fillMaxSize()
-            }
-            Image(
-                bitmap = bitmap,
-                contentDescription = contentDescription,
-                modifier = imgModifier,
-                contentScale = contentScale,
-                filterQuality = FilterQuality.Low
-            )
-        } else {
+    val bitmap = asyncBitmap
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = contentDescription,
+            modifier = if (imageClipShape != null) modifier.clip(imageClipShape) else modifier,
+            contentScale = contentScale,
+            filterQuality = FilterQuality.Low
+        )
+    } else {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
             fallback()
         }
     }
@@ -1441,6 +1466,35 @@ fun LazyGridAlbumArtworkPreloader(
                             sources = slice,
                             sizePx = 256
                         )
+                    }
+                }
+        } finally {
+            if (markedScrolling) {
+                ArtworkCacheManager.onScrollStop()
+            }
+        }
+    }
+}
+
+/**
+ * Lightweight zero-recomposition scroll state tracker for lists that do not require artwork preloading
+ * (such as Folders, Artists, or horizontal carousels) so background prewarming and progress polling
+ * pause while scrolling is active.
+ */
+@Composable
+fun LazyListScrollStateTracker(listState: LazyListState) {
+    LaunchedEffect(listState) {
+        var markedScrolling = false
+        try {
+            snapshotFlow { listState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { scrolling ->
+                    if (scrolling && !markedScrolling) {
+                        markedScrolling = true
+                        ArtworkCacheManager.onScrollStart()
+                    } else if (!scrolling && markedScrolling) {
+                        markedScrolling = false
+                        ArtworkCacheManager.onScrollStop()
                     }
                 }
         } finally {

@@ -116,29 +116,27 @@ fun ScannedAudioListScreen(
         onSortOrderChange ?: { localSortOrder = it }
     }
 
-    val filteredAndSortedSongs by remember(displayedSongs, songs, searchQuery, selectedSortOrder) {
-        derivedStateOf {
-            if (displayedSongs != null) {
-                displayedSongs
+    val filteredAndSortedSongs = remember(displayedSongs, songs, searchQuery, selectedSortOrder) {
+        if (displayedSongs != null) {
+            displayedSongs
+        } else {
+            val query = searchQuery.trim()
+            val filtered = if (query.isEmpty()) {
+                songs
             } else {
-                val query = searchQuery.trim()
-                val filtered = if (query.isEmpty()) {
-                    songs
-                } else {
-                    songs.filter { song ->
-                        song.title.contains(query, ignoreCase = true) ||
-                            song.artist.contains(query, ignoreCase = true) ||
-                            song.album.contains(query, ignoreCase = true) ||
-                            song.folderName.contains(query, ignoreCase = true)
-                    }
+                songs.filter { song ->
+                    song.title.contains(query, ignoreCase = true) ||
+                        song.artist.contains(query, ignoreCase = true) ||
+                        song.album.contains(query, ignoreCase = true) ||
+                        song.folderName.contains(query, ignoreCase = true)
                 }
+            }
 
-                when (selectedSortOrder) {
-                    SortOrder.TITLE_ASC -> filtered
-                    SortOrder.ARTIST_ASC -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
-                    SortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
-                    SortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAdded }
-                }
+            when (selectedSortOrder) {
+                SortOrder.TITLE_ASC -> filtered
+                SortOrder.ARTIST_ASC -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
+                SortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
+                SortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAdded }
             }
         }
     }
@@ -171,7 +169,6 @@ fun ScannedAudioListScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .testTag("scanned_audio_list_screen")
     ) {
         Column(
@@ -455,10 +452,13 @@ private fun ScannedAudioItemRow(
             )
         }
 
-        Spacer(modifier = Modifier.width(14.dp))
-
-        // Metadata Column
-        Column(modifier = Modifier.weight(1f)) {
+        // Metadata Column (flattened without 3 Spacer LayoutNodes per row)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.titleMedium,
@@ -467,7 +467,6 @@ private fun ScannedAudioItemRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = song.artistAlbumSubtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -475,7 +474,6 @@ private fun ScannedAudioItemRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = song.durationFolderSubtitle,
                 style = MaterialTheme.typography.labelSmall,

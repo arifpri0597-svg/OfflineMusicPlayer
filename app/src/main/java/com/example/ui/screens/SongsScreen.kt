@@ -62,25 +62,23 @@ fun SongsScreen(
     onAddToQueue: (Song) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val filteredSongs by remember(songs, searchQuery, sortOrder) {
-        derivedStateOf {
-            val q = searchQuery.trim()
-            val queried = if (q.isEmpty()) {
-                songs
-            } else {
-                songs.filter {
-                    it.title.contains(q, ignoreCase = true) ||
-                        it.artist.contains(q, ignoreCase = true) ||
-                        it.album.contains(q, ignoreCase = true)
-                }
+    val filteredSongs = remember(songs, searchQuery, sortOrder) {
+        val q = searchQuery.trim()
+        val queried = if (q.isEmpty()) {
+            songs
+        } else {
+            songs.filter {
+                it.title.contains(q, ignoreCase = true) ||
+                    it.artist.contains(q, ignoreCase = true) ||
+                    it.album.contains(q, ignoreCase = true)
             }
+        }
 
-            when (sortOrder) {
-                SortOrder.TITLE_ASC -> queried.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-                SortOrder.ARTIST_ASC -> queried.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
-                SortOrder.DURATION_DESC -> queried.sortedByDescending { it.durationMs }
-                SortOrder.DATE_ADDED_DESC -> queried.sortedByDescending { it.dateAdded }
-            }
+        when (sortOrder) {
+            SortOrder.TITLE_ASC -> queried.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+            SortOrder.ARTIST_ASC -> queried.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
+            SortOrder.DURATION_DESC -> queried.sortedByDescending { it.durationMs }
+            SortOrder.DATE_ADDED_DESC -> queried.sortedByDescending { it.dateAdded }
         }
     }
 
