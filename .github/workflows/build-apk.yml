@@ -64,35 +64,45 @@ jobs:
         run: |
           rm -rf app/build build .build-outputs
 
-      - name: Build Debug APK
+      - name: Build Release and Debug APKs
         run: |
-          ./gradlew clean assembleDebug verifyDebugApk --no-build-cache --no-configuration-cache --stacktrace
+          ./gradlew clean testDebugUnitTest assembleRelease verifyReleaseApk assembleDebug verifyDebugApk --no-build-cache --no-configuration-cache --stacktrace
 
-      - name: Verify APK Output (ZIP Integrity, Zipalign, Apksigner, Badging)
+      - name: Verify APK Outputs (ZIP Integrity, Zipalign, Apksigner, Badging)
         run: |
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: Expected Debug APK not found at $APK_PATH"
-            exit 1
-          fi
-          ls -lh "$APK_PATH"
-          echo "=== Verifying ZIP Archive Integrity ==="
-          unzip -t "$APK_PATH" > /dev/null
-          ZIPALIGN_BIN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -n 1)
-          if [ -n "$ZIPALIGN_BIN" ]; then
-            echo "=== Verifying APK Alignment with $ZIPALIGN_BIN ==="
-            "$ZIPALIGN_BIN" -c -v 4 "$APK_PATH" | tail -n 10
-          fi
-          APKSIGNER_BIN=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          if [ -n "$APKSIGNER_BIN" ]; then
-            echo "=== Verifying APK Signature with $APKSIGNER_BIN ==="
-            "$APKSIGNER_BIN" verify --min-sdk-version 21 --verbose --print-certs "$APK_PATH"
-          fi
-          AAPT2_BIN=$(find $ANDROID_HOME/build-tools -name "aapt2" | sort -V | tail -n 1)
-          if [ -n "$AAPT2_BIN" ]; then
-            echo "=== Verifying APK Badging with $AAPT2_BIN ==="
-            "$AAPT2_BIN" dump badging "$APK_PATH" | head -n 30
-          fi
+          for APK_PATH in "app/build/outputs/apk/release/app-release.apk" "app/build/outputs/apk/debug/app-debug.apk"; do
+            if [ ! -f "$APK_PATH" ]; then
+              echo "ERROR: Expected APK not found at $APK_PATH"
+              exit 1
+            fi
+            ls -lh "$APK_PATH"
+            echo "=== Verifying ZIP Archive Integrity for $APK_PATH ==="
+            unzip -t "$APK_PATH" > /dev/null
+            ZIPALIGN_BIN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -n 1)
+            if [ -n "$ZIPALIGN_BIN" ]; then
+              echo "=== Verifying APK Alignment with $ZIPALIGN_BIN ==="
+              "$ZIPALIGN_BIN" -c -v 4 "$APK_PATH" | tail -n 10
+            fi
+            APKSIGNER_BIN=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+            if [ -n "$APKSIGNER_BIN" ]; then
+              echo "=== Verifying APK Signature with $APKSIGNER_BIN ==="
+              "$APKSIGNER_BIN" verify --min-sdk-version 21 --verbose --print-certs "$APK_PATH"
+            fi
+            AAPT2_BIN=$(find $ANDROID_HOME/build-tools -name "aapt2" | sort -V | tail -n 1)
+            if [ -n "$AAPT2_BIN" ]; then
+              echo "=== Verifying APK Badging with $AAPT2_BIN ==="
+              "$AAPT2_BIN" dump badging "$APK_PATH" | head -n 30
+            fi
+          done
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PureTune-app-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4

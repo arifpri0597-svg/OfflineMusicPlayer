@@ -41,16 +41,30 @@ class PlaybackStateRepository(
     private val context: Context,
     private val musicDao: MusicDao
 ) {
-    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val serialIoDispatcher = Dispatchers.IO.limitedParallelism(1)
+    private val repositoryScope = CoroutineScope(SupervisorJob() + serialIoDispatcher)
+    private val monotonicTimestamp = java.util.concurrent.atomic.AtomicLong(0L)
+
+    private fun nextTimestamp(candidate: Long): Long {
+        val base = if (candidate > 0L) candidate else System.currentTimeMillis()
+        while (true) {
+            val prev = monotonicTimestamp.get()
+            val next = if (base > prev) base else prev + 1L
+            if (monotonicTimestamp.compareAndSet(prev, next)) {
+                return next
+            }
+        }
+    }
 
     private val syncPrefs by lazy {
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     suspend fun savePlaybackState(state: PlaybackStateEntity) {
-        val sanitized = sanitizeState(state) ?: return
+        val sanitized = sanitizeState(state)?.copy(lastUpdated = nextTimestamp(state.lastUpdated)) ?: return
         writeBackupPrefs(sanitized, commitSynchronously = false)
-        withContext(NonCancellable + Dispatchers.IO) {
+        withContext(NonCancellable + serialIoDispatcher) {
             try {
                 musicDao.upsertPlaybackState(sanitized)
             } catch (e: Exception) {
@@ -99,11 +113,11 @@ class PlaybackStateRepository(
 
     /**
      * Immediately persists playback state to synchronous storage and dispatches a non-cancellable
-     * Room upsert on Dispatchers.IO. Safe to call from `onTaskRemoved`, `onStop`, `onDestroy`,
+     * Room upsert on a serialized IO dispatcher. Safe to call from `onTaskRemoved`, `onStop`, `onDestroy`,
      * pause, and seek handlers without blocking UI rendering.
      */
     fun savePlaybackStateImmediate(state: PlaybackStateEntity) {
-        val sanitized = sanitizeState(state) ?: return
+        val sanitized = sanitizeState(state)?.copy(lastUpdated = nextTimestamp(state.lastUpdated)) ?: return
         writeBackupPrefs(sanitized, commitSynchronously = false)
         repositoryScope.launch(NonCancellable) {
             try {
@@ -118,7 +132,7 @@ class PlaybackStateRepository(
      * Retrieves the last saved playback state from Room (reconciling with the synchronous
      * lifecycle backup if the process was terminated before an async transaction completed).
      */
-    suspend fun getLastPlaybackState(): PlaybackStateEntity? = withContext(Dispatchers.IO) {
+    suspend fun getLastPlaybackState(): PlaybackStateEntity? = withContext(serialIoDispatcher) {
         val roomState = try {
             musicDao.getPlaybackState(PlaybackStateEntity.SINGLETON_ID)
         } catch (_: Exception) {
@@ -128,7 +142,7 @@ class PlaybackStateRepository(
 
         val chosen = when {
             roomState != null && backupState != null -> {
-                if (backupState.lastUpdated > roomState.lastUpdated) {
+                if (backupState.lastUpdated >= roomState.lastUpdated) {
                     try {
                         musicDao.upsertPlaybackState(backupState)
                     } catch (_: Exception) {
@@ -161,7 +175,7 @@ class PlaybackStateRepository(
         return musicDao.getPlaybackStateFlow(PlaybackStateEntity.SINGLETON_ID)
     }
 
-    suspend fun clearPlaybackState() = withContext(NonCancellable + Dispatchers.IO) {
+    suspend fun clearPlaybackState() = withContext(NonCancellable + serialIoDispatcher) {
         clearBackupPrefs()
         try {
             musicDao.clearPlaybackState()

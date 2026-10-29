@@ -53,11 +53,24 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("release")
+      signingConfigs.getByName("release").apply {
+        if (storePassword.isNullOrBlank()) {
+          storeFile = file("${rootDir}/debug.keystore")
+          storePassword = "android"
+          keyAlias = "androiddebugkey"
+          keyPassword = "android"
+        }
+        enableV1Signing = true
+        enableV2Signing = true
+        enableV3Signing = true
+        enableV4Signing = false
+      }
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
@@ -510,5 +523,142 @@ tasks.register<VerifyDebugApkTask>("verifyDebugApk") {
   }
   reportFileProperty.set(layout.buildDirectory.file("apk-inspection.txt"))
 }
+
+abstract class NormalizeAndSignReleaseApkTask : DefaultTask() {
+  @get:Internal
+  abstract val apkDirProperty: DirectoryProperty
+
+  @get:InputFile
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val fallbackKeystoreFileProperty: RegularFileProperty
+
+  @get:Internal
+  abstract val rootDirProperty: DirectoryProperty
+
+  @TaskAction
+  fun normalizeAndSignRelease() {
+    val rootDirFile = rootDirProperty.get().asFile
+    val defaultUploadKs = File(rootDirFile, "my-upload-key.jks")
+    val releaseDir = apkDirProperty.get().asFile
+    val signedTarget = File(releaseDir, "app-release.apk")
+    val unsignedSource = File(releaseDir, "app-release-unsigned.apk")
+    val sourceApk =
+        when {
+          signedTarget.exists() && signedTarget.length() > 0L -> signedTarget
+          unsignedSource.exists() && unsignedSource.length() > 0L -> unsignedSource
+          else -> return
+        }
+
+    val envKeystorePath = System.getenv("KEYSTORE_PATH")
+    val envStorePassword = System.getenv("STORE_PASSWORD")
+    val envKeyPassword = System.getenv("KEY_PASSWORD")
+    val uploadKeystore =
+        if (!envKeystorePath.isNullOrBlank()) File(envKeystorePath) else defaultUploadKs
+
+    val useReleaseKeystore =
+        uploadKeystore.exists() &&
+            !envStorePassword.isNullOrBlank() &&
+            !envKeyPassword.isNullOrBlank()
+
+    val keystoreFile =
+        if (useReleaseKeystore) uploadKeystore else fallbackKeystoreFileProperty.get().asFile
+    val storePass = if (useReleaseKeystore) envStorePassword!! else "android"
+    val keyPass = if (useReleaseKeystore) envKeyPassword!! else "android"
+    val keyAlias = if (useReleaseKeystore) "upload" else "androiddebugkey"
+
+    val sdkRoot =
+        System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk"
+    val buildToolsDir =
+        File(sdkRoot, "build-tools").listFiles()?.sortedBy { it.name }?.lastOrNull()
+    if (buildToolsDir != null) {
+      val zipalign = File(buildToolsDir, "zipalign")
+      val apksigner = File(buildToolsDir, "apksigner")
+      if (zipalign.exists() && apksigner.exists() && keystoreFile.exists()) {
+        val alignedTmp = File(releaseDir, "app-release-aligned.tmp.apk")
+        if (alignedTmp.exists()) alignedTmp.delete()
+        val alignProc =
+            ProcessBuilder(
+                    zipalign.absolutePath,
+                    "-f",
+                    "-p",
+                    "4",
+                    sourceApk.absolutePath,
+                    alignedTmp.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val alignOut = alignProc.inputStream.bufferedReader().readText()
+        val alignCode = alignProc.waitFor()
+        if (alignCode != 0 || !alignedTmp.exists()) {
+          throw GradleException("zipalign release failed (exit=$alignCode):\n$alignOut")
+        }
+        alignedTmp.copyTo(signedTarget, overwrite = true)
+        alignedTmp.delete()
+
+        val signProc =
+            ProcessBuilder(
+                    apksigner.absolutePath,
+                    "sign",
+                    "--min-sdk-version",
+                    "21",
+                    "--v1-signing-enabled",
+                    "true",
+                    "--v2-signing-enabled",
+                    "true",
+                    "--v3-signing-enabled",
+                    "true",
+                    "--v4-signing-enabled",
+                    "false",
+                    "--ks",
+                    keystoreFile.absolutePath,
+                    "--ks-pass",
+                    "pass:$storePass",
+                    "--key-pass",
+                    "pass:$keyPass",
+                    "--ks-key-alias",
+                    keyAlias,
+                    signedTarget.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+        val signOut = signProc.inputStream.bufferedReader().readText()
+        val signCode = signProc.waitFor()
+        if (signCode != 0) {
+          throw GradleException("apksigner release sign failed (exit=$signCode):\n$signOut")
+        }
+        val v4Idsig = File(releaseDir, "app-release.apk.idsig")
+        if (v4Idsig.exists()) v4Idsig.delete()
+        if (unsignedSource.exists()) {
+          unsignedSource.delete()
+        }
+      }
+    }
+  }
+}
+
+val normalizeAndSignReleaseApk =
+    tasks.register<NormalizeAndSignReleaseApkTask>("normalizeAndSignReleaseApk") {
+      dependsOn(ensureDebugKeystore)
+      apkDirProperty.set(layout.buildDirectory.dir("outputs/apk/release"))
+      fallbackKeystoreFileProperty.set(rootProject.layout.projectDirectory.file("debug.keystore"))
+      rootDirProperty.set(rootProject.layout.projectDirectory)
+    }
+
+tasks
+    .matching { it.name == "validateSigningRelease" || it.name == "packageRelease" }
+    .configureEach { dependsOn(ensureDebugKeystore) }
+
+tasks
+    .matching { it.name == "packageRelease" || it.name == "createReleaseApkListingFileRedirect" }
+    .configureEach { finalizedBy(normalizeAndSignReleaseApk) }
+
+tasks
+    .matching { it.name == "assembleRelease" }
+    .configureEach { dependsOn(normalizeAndSignReleaseApk) }
+
+tasks.register<VerifyDebugApkTask>("verifyReleaseApk") {
+  dependsOn("assembleRelease", normalizeAndSignReleaseApk)
+  apkFileProperty.set(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+  reportFileProperty.set(layout.buildDirectory.file("release-apk-inspection.txt"))
+}
+
 
 
