@@ -90,11 +90,8 @@ fun AlbumsScreen(
             headerItemCount = 1
         )
 
-        val flingBehavior = com.example.util.rememberPerformanceFlingBehavior()
-
         LazyColumn(
             state = detailListState,
-            flingBehavior = flingBehavior,
             modifier = modifier
                 .fillMaxSize()
                 .testTag("album_detail_screen"),
@@ -230,10 +227,8 @@ fun AlbumsScreen(
                 gridState = gridState,
                 albums = albums
             )
-            val flingBehavior = com.example.util.rememberPerformanceFlingBehavior()
             LazyVerticalGrid(
                 state = gridState,
-                flingBehavior = flingBehavior,
                 columns = GridCells.Adaptive(160.dp),
                 modifier = modifier
                     .fillMaxSize()

@@ -72,33 +72,3 @@ enum class RepeatMode {
     ALL,
     ONE
 }
-
-enum class PerformanceMode(
-    val storageKey: String,
-    val title: String,
-    val description: String,
-    val targetFps: Int,
-    val targetDisplayHz: Int
-) {
-    FPS_60_HZ_120(
-        storageKey = "fps_60_hz_120",
-        title = "60 FPS + 120Hz",
-        description = "Recommended for stable performance and lower battery usage",
-        targetFps = 60,
-        targetDisplayHz = 120
-    ),
-    FPS_120_HZ_120(
-        storageKey = "fps_120_hz_120",
-        title = "120 FPS + 120Hz",
-        description = "Maximum smoothness on supported devices",
-        targetFps = 120,
-        targetDisplayHz = 120
-    );
-
-    companion object {
-        fun fromStorageKey(key: String?): PerformanceMode {
-            return entries.firstOrNull { it.storageKey == key } ?: FPS_60_HZ_120
-        }
-    }
-}
-

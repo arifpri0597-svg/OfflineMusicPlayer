@@ -22,10 +22,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VolumeUp
-import com.example.data.model.PerformanceMode
-import com.example.util.PerformanceModeManager
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -57,8 +54,6 @@ fun SettingsScreen(
     onResumeLastChange: (Boolean) -> Unit = {},
     autoPauseOnHeadsetUnplug: Boolean = true,
     onPauseOnHeadsetUnplugChange: (Boolean) -> Unit = {},
-    performanceMode: PerformanceMode = PerformanceMode.FPS_60_HZ_120,
-    onPerformanceModeChange: (PerformanceMode) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -95,66 +90,6 @@ fun SettingsScreen(
                     onClick = { showThemeDialog = true },
                     tag = "theme_setting_item"
                 )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        // Performance Mode (Decoupled Rendering FPS + Display Refresh Rate Hz)
-        item(key = "settings_performance", contentType = "section") {
-            val capability = PerformanceModeManager.latestCapabilityInfo
-            SectionHeader(title = "Performance")
-            SettingsCard {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("performance_mode_section")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Performance Mode",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            val hzSummary = if (capability.supports120Hz) {
-                                "120Hz display detected • Active: ${capability.effectiveRenderFps.toInt()} FPS @ ${capability.effectiveDisplayHz.toInt()}Hz"
-                            } else {
-                                "${capability.maxSupportedRefreshRateHz.toInt()}Hz display detected (safe fallback active)"
-                            }
-                            Text(
-                                text = hzSummary,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    PerformanceModeOptionItem(
-                        mode = PerformanceMode.FPS_60_HZ_120,
-                        selected = performanceMode == PerformanceMode.FPS_60_HZ_120,
-                        onSelect = { onPerformanceModeChange(PerformanceMode.FPS_60_HZ_120) },
-                        tag = "performance_mode_60_120"
-                    )
-
-                    PerformanceModeOptionItem(
-                        mode = PerformanceMode.FPS_120_HZ_120,
-                        selected = performanceMode == PerformanceMode.FPS_120_HZ_120,
-                        onSelect = { onPerformanceModeChange(PerformanceMode.FPS_120_HZ_120) },
-                        tag = "performance_mode_120_120"
-                    )
-                }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -459,50 +394,3 @@ private fun ThemeOption(
         Text(text = label, style = MaterialTheme.typography.bodyLarge)
     }
 }
-
-@Composable
-private fun PerformanceModeOptionItem(
-    mode: PerformanceMode,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    tag: String
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect)
-            .testTag(tag),
-        color = androidx.compose.ui.graphics.Color.Transparent
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = selected,
-                onClick = onSelect
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = mode.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                )
-                Text(
-                    text = mode.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-

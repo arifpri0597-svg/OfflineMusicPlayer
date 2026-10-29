@@ -495,6 +495,10 @@ class ExampleRobolectricTest {
 
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_settings")).performClick()
             composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("settings_screen")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("performance_mode_section")).assertDoesNotExist()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("performance_mode_60_120")).assertDoesNotExist()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("performance_mode_120_120")).assertDoesNotExist()
 
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_home")).performClick()
             composeTestRule.waitForIdle()
@@ -666,78 +670,91 @@ class ExampleRobolectricTest {
 
     @Test
     @Config(sdk = [33])
-    fun `performanceMode separates 60 and 120 FPS rendering from 120Hz display refresh rate and persists across restarts`() = runBlocking {
+    fun `internal automatic frame rate policy scales from 60 FPS minimum to 90Hz 120Hz 144Hz and hides any UI setting`() {
+        // 1. 60Hz device -> targets 60 FPS / 60Hz
+        val modes60Hz = listOf(
+            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f)
+        )
+        val cap60 = com.example.util.PerformanceModeManager.resolveAutomaticPolicyFromModes(
+            currentRefreshRate = 60f,
+            currentWidth = 1080,
+            currentHeight = 2400,
+            supportedModes = modes60Hz
+        )
+        assertEquals(60f, cap60.minTargetFps, 0.01f)
+        assertEquals(60f, cap60.effectiveDisplayHz, 0.01f)
+        assertEquals(60f, cap60.effectiveRenderFps, 0.01f)
+        assertEquals(1, cap60.preferredDisplayModeId)
+        assertFalse(cap60.supports90Hz)
+        assertFalse(cap60.supports120Hz)
+
+        // 2. 90Hz device -> maintains 60 FPS minimum target and automatically scales up to 90Hz / 90 FPS
+        val modes90Hz = listOf(
+            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f),
+            com.example.util.DisplayModeSpec(modeId = 2, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 90f)
+        )
+        val cap90 = com.example.util.PerformanceModeManager.resolveAutomaticPolicyFromModes(
+            currentRefreshRate = 60f,
+            currentWidth = 1080,
+            currentHeight = 2400,
+            supportedModes = modes90Hz
+        )
+        assertEquals(60f, cap90.minTargetFps, 0.01f)
+        assertEquals(90f, cap90.effectiveDisplayHz, 0.01f)
+        assertEquals(90f, cap90.effectiveRenderFps, 0.01f)
+        assertEquals(2, cap90.preferredDisplayModeId)
+        assertTrue(cap90.supports90Hz)
+        assertFalse(cap90.supports120Hz)
+
+        // 3. 120Hz device -> maintains 60 FPS minimum target and automatically scales up to 120Hz / 120 FPS (never capped at 60Hz)
         val modes120Hz = listOf(
             com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f),
             com.example.util.DisplayModeSpec(modeId = 2, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 90f),
             com.example.util.DisplayModeSpec(modeId = 3, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 120f)
         )
-
-        // 1. 60 FPS + 120Hz mode: Display MUST stay at 120Hz (modeId = 3) while rendering targets 60 FPS
-        val cap60 = com.example.util.PerformanceModeManager.resolveCapabilitiesFromModes(
+        val cap120 = com.example.util.PerformanceModeManager.resolveAutomaticPolicyFromModes(
             currentRefreshRate = 60f,
             currentWidth = 1080,
             currentHeight = 2400,
-            supportedModes = modes120Hz,
-            mode = com.example.data.model.PerformanceMode.FPS_60_HZ_120
+            supportedModes = modes120Hz
         )
-        assertTrue(cap60.supports120Hz)
-        assertEquals(3, cap60.preferredDisplayModeId)
-        assertEquals(120f, cap60.effectiveDisplayHz, 0.01f)
-        assertEquals(60f, cap60.effectiveRenderFps, 0.01f)
-
-        // 2. 120 FPS + 120Hz mode: Display stays at 120Hz (modeId = 3) and rendering targets 120 FPS
-        val cap120 = com.example.util.PerformanceModeManager.resolveCapabilitiesFromModes(
-            currentRefreshRate = 60f,
-            currentWidth = 1080,
-            currentHeight = 2400,
-            supportedModes = modes120Hz,
-            mode = com.example.data.model.PerformanceMode.FPS_120_HZ_120
-        )
-        assertTrue(cap120.supports120Hz)
-        assertEquals(3, cap120.preferredDisplayModeId)
+        assertEquals(60f, cap120.minTargetFps, 0.01f)
         assertEquals(120f, cap120.effectiveDisplayHz, 0.01f)
         assertEquals(120f, cap120.effectiveRenderFps, 0.01f)
+        assertEquals(3, cap120.preferredDisplayModeId)
+        assertTrue(cap120.supports90Hz)
+        assertTrue(cap120.supports120Hz)
 
-        // 3. Safe fallback on a 60Hz-only device
-        val modes60HzOnly = listOf(
-            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f)
+        // 4. Higher-refresh-rate device (144Hz) -> scales to 144Hz at the active physical resolution
+        val modes144Hz = listOf(
+            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 60f),
+            com.example.util.DisplayModeSpec(modeId = 3, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 120f),
+            com.example.util.DisplayModeSpec(modeId = 4, physicalWidth = 1080, physicalHeight = 2400, refreshRate = 144f),
+            // Different resolution mode must be ignored to avoid resolution-switch jank
+            com.example.util.DisplayModeSpec(modeId = 5, physicalWidth = 720, physicalHeight = 1600, refreshRate = 165f)
         )
-        val fallback120 = com.example.util.PerformanceModeManager.resolveCapabilitiesFromModes(
+        val cap144 = com.example.util.PerformanceModeManager.resolveAutomaticPolicyFromModes(
             currentRefreshRate = 60f,
             currentWidth = 1080,
             currentHeight = 2400,
-            supportedModes = modes60HzOnly,
-            mode = com.example.data.model.PerformanceMode.FPS_120_HZ_120
+            supportedModes = modes144Hz
         )
-        assertFalse(fallback120.supports120Hz)
-        assertEquals(60f, fallback120.effectiveDisplayHz, 0.01f)
-        assertEquals(60f, fallback120.effectiveRenderFps, 0.01f)
+        assertEquals(144f, cap144.effectiveDisplayHz, 0.01f)
+        assertEquals(144f, cap144.effectiveRenderFps, 0.01f)
+        assertEquals(4, cap144.preferredDisplayModeId)
 
-        // 4. Verify SixtiesOnHighHzFrameClock skips intermediate 8.33ms 120Hz VSYNC tick to deliver 60 FPS (16.67ms)
-        var simulatedVsyncNanos = 100_000_000L
-        val fake120HzClock = object : androidx.compose.runtime.MonotonicFrameClock {
-            override suspend fun <R> withFrameNanos(onFrame: (frameTimeNanos: Long) -> R): R {
-                simulatedVsyncNanos += 8_333_333L // 8.33ms (120Hz VSYNC)
-                return onFrame(simulatedVsyncNanos)
-            }
-        }
-        val pacedClock = com.example.util.SixtiesOnHighHzFrameClock(fake120HzClock)
-        val firstFrameTime = pacedClock.withFrameNanos { it }
-        val secondFrameTime = pacedClock.withFrameNanos { it }
-        // The interval between delivered frames must be 2 x 8.33ms = 16.67ms (60 FPS on 120Hz display)
-        assertEquals(16_666_666L, secondFrameTime - firstFrameTime)
-
-        // 5. Verify persistence across app restarts via UserPreferences
-        val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
-        val prefs = app.userPreferences
-        prefs.setPerformanceMode(com.example.data.model.PerformanceMode.FPS_120_HZ_120)
-        assertEquals(com.example.data.model.PerformanceMode.FPS_120_HZ_120, prefs.getInitialPerformanceModeSync())
-        assertEquals(com.example.data.model.PerformanceMode.FPS_120_HZ_120, prefs.performanceMode.first())
-
-        prefs.setPerformanceMode(com.example.data.model.PerformanceMode.FPS_60_HZ_120)
-        assertEquals(com.example.data.model.PerformanceMode.FPS_60_HZ_120, prefs.getInitialPerformanceModeSync())
-        assertEquals(com.example.data.model.PerformanceMode.FPS_60_HZ_120, prefs.performanceMode.first())
+        // 5. Hardware-constrained device (< 60Hz, e.g. 50Hz) -> never forced beyond its actual supported capability
+        val modes50Hz = listOf(
+            com.example.util.DisplayModeSpec(modeId = 1, physicalWidth = 720, physicalHeight = 1280, refreshRate = 50f)
+        )
+        val cap50 = com.example.util.PerformanceModeManager.resolveAutomaticPolicyFromModes(
+            currentRefreshRate = 50f,
+            currentWidth = 720,
+            currentHeight = 1280,
+            supportedModes = modes50Hz
+        )
+        assertEquals(50f, cap50.minTargetFps, 0.01f)
+        assertEquals(50f, cap50.effectiveDisplayHz, 0.01f)
+        assertEquals(50f, cap50.effectiveRenderFps, 0.01f)
     }
 }
-

@@ -218,11 +218,8 @@ fun FoldersScreen(
             headerItemCount = 1
         )
 
-        val flingBehavior = com.example.util.rememberPerformanceFlingBehavior()
-
         LazyColumn(
             state = folderListState,
-            flingBehavior = flingBehavior,
             modifier = modifier
                 .fillMaxSize()
                 .testTag("folder_detail_screen"),
@@ -300,9 +297,7 @@ fun FoldersScreen(
                 modifier = modifier.fillMaxSize()
             )
         } else {
-            val flingBehavior = com.example.util.rememberPerformanceFlingBehavior()
             LazyColumn(
-                flingBehavior = flingBehavior,
                 modifier = modifier
                     .fillMaxSize()
                     .testTag("folders_list"),

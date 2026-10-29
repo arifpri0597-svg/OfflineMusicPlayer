@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        applyActivePerformanceMode()
+        applyAutomaticFrameRatePolicy()
 
         val initialGranted = checkAudioPermission()
         viewModel.onPermissionResult(initialGranted)
@@ -105,16 +105,6 @@ class MainActivity : ComponentActivity() {
             val libraryStateRef = viewModel.libraryState.collectAsState()
             val userThemePreference by remember {
                 androidx.compose.runtime.derivedStateOf { libraryStateRef.value.userThemePreference }
-            }
-            val performanceMode by remember {
-                androidx.compose.runtime.derivedStateOf { libraryStateRef.value.performanceMode }
-            }
-
-            androidx.compose.runtime.LaunchedEffect(performanceMode) {
-                com.example.util.PerformanceModeManager.applyPerformanceMode(
-                    activity = this@MainActivity,
-                    mode = performanceMode
-                )
             }
 
             val isDarkTheme = when (userThemePreference) {
@@ -175,7 +165,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        applyActivePerformanceMode()
+        applyAutomaticFrameRatePolicy()
         if (isFinishing || isDestroyed || isPermissionRequestInFlight) return
         // Re-check permissions on resume (e.g., if user returned from Settings or permission dialog)
         val hasPermission = checkAudioPermission()
@@ -185,22 +175,18 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            applyActivePerformanceMode()
+            applyAutomaticFrameRatePolicy()
         }
     }
 
     /**
-     * Applies the user's selected [com.example.data.model.PerformanceMode]:
-     * - Keeps the physical display refresh rate at 120Hz (or highest supported hardware refresh rate)
-     *   in BOTH "60 FPS + 120Hz" and "120 FPS + 120Hz" modes (never forcing the display down to 60Hz).
-     * - Configures the rendering frame rate target (60 FPS vs 120 FPS) with safe fallback on
-     *   devices that do not support 120Hz.
+     * Applies PureTune's internal automatic frame-rate policy at the Activity / Window level:
+     * - Maintains a 60 FPS minimum target where supported by the device.
+     * - Automatically scales upward to 90Hz, 120Hz, or higher supported refresh rates at the
+     *   active physical resolution without mode-switch jank during scrolling.
      */
-    private fun applyActivePerformanceMode() {
-        com.example.util.PerformanceModeManager.applyPerformanceMode(
-            activity = this,
-            mode = viewModel.libraryState.value.performanceMode
-        )
+    private fun applyAutomaticFrameRatePolicy() {
+        com.example.util.PerformanceModeManager.applyAutomaticFrameRatePolicy(this)
     }
 
     override fun onPause() {
@@ -390,9 +376,6 @@ fun PulseMusicAppRoot(
     val onThemeChange = remember(viewModel) { { mode: String -> viewModel.setThemeMode(mode) } }
     val onResumeLastChange = remember(viewModel) { { enabled: Boolean -> viewModel.setResumeLastPlayback(enabled) } }
     val onPauseOnHeadsetUnplugChange = remember(viewModel) { { enabled: Boolean -> viewModel.setPauseOnHeadsetUnplug(enabled) } }
-    val onPerformanceModeChange = remember(viewModel) {
-        { mode: com.example.data.model.PerformanceMode -> viewModel.setPerformanceMode(mode) }
-    }
     val onNavigateToSongs = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.SONGS) } }
     val onNavigateToAlbums = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.ALBUMS) } }
     val onNavigateToPlaylists = remember(viewModel) { { viewModel.setNavigationTab(NavigationTab.PLAYLISTS) } }
@@ -638,9 +621,7 @@ fun PulseMusicAppRoot(
                                 resumeLastPlayback = libraryState.resumeLastPlayback,
                                 onResumeLastChange = onResumeLastChange,
                                 autoPauseOnHeadsetUnplug = libraryState.pauseOnHeadsetUnplug,
-                                onPauseOnHeadsetUnplugChange = onPauseOnHeadsetUnplugChange,
-                                performanceMode = libraryState.performanceMode,
-                                onPerformanceModeChange = onPerformanceModeChange
+                                onPauseOnHeadsetUnplugChange = onPauseOnHeadsetUnplugChange
                             )
                         }
                     }

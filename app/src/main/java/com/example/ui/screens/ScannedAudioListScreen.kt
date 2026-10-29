@@ -304,11 +304,9 @@ fun ScannedAudioListScreen(
                     songs = filteredAndSortedSongs,
                     headerItemCount = 1
                 )
-                val flingBehavior = com.example.util.rememberPerformanceFlingBehavior()
                 // Main LazyColumn
                 LazyColumn(
                     state = listState,
-                    flingBehavior = flingBehavior,
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("scanned_audio_lazy_column"),

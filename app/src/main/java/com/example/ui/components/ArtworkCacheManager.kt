@@ -127,22 +127,9 @@ object ArtworkCacheManager {
     @Volatile
     private var diskCacheDir: File? = null
 
-    @Volatile
-    private var performanceMode: com.example.data.model.PerformanceMode =
-        com.example.data.model.PerformanceMode.FPS_60_HZ_120
-
     private val missingArtworkException = NoSuchElementException("Cached missing album artwork")
 
-    fun setPerformanceMode(mode: com.example.data.model.PerformanceMode) {
-        performanceMode = mode
-    }
-
-    fun getPerformanceMode(): com.example.data.model.PerformanceMode = performanceMode
-
-    fun getFlingDebounceMs(): Long = when (performanceMode) {
-        com.example.data.model.PerformanceMode.FPS_60_HZ_120 -> 64L
-        com.example.data.model.PerformanceMode.FPS_120_HZ_120 -> 48L
-    }
+    fun getFlingDebounceMs(): Long = 55L
 
     fun onScrollStart() {
         activeScrollCount.incrementAndGet()

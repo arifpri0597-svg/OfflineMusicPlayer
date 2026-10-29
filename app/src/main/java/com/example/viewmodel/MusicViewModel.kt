@@ -12,7 +12,6 @@ import com.example.data.local.PlaylistSongCrossRef
 import com.example.data.model.Album
 import com.example.data.model.Artist
 import com.example.data.model.Folder
-import com.example.data.model.PerformanceMode
 import com.example.data.model.Playlist
 import com.example.data.model.Song
 import com.example.data.model.SortOrder
@@ -86,8 +85,7 @@ data class LibraryUiState(
     val hasPermission: Boolean = false,
     val userThemePreference: String = "system",
     val resumeLastPlayback: Boolean = true,
-    val pauseOnHeadsetUnplug: Boolean = true,
-    val performanceMode: PerformanceMode = PerformanceMode.FPS_60_HZ_120
+    val pauseOnHeadsetUnplug: Boolean = true
 )
 
 @Stable
@@ -149,11 +147,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             )
         )
 
-    private val _libraryState = MutableStateFlow(
-        LibraryUiState(
-            performanceMode = userPrefs.getInitialPerformanceModeSync()
-        )
-    )
+    private val _libraryState = MutableStateFlow(LibraryUiState())
     val libraryState: StateFlow<LibraryUiState> = _libraryState.asStateFlow()
 
     private var playlistSongsJob: Job? = null
@@ -166,7 +160,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var lastGroupedSongIds: List<Long> = emptyList()
 
     init {
-        com.example.ui.components.ArtworkCacheManager.setPerformanceMode(_libraryState.value.performanceMode)
         observePreferences()
     }
 
@@ -439,20 +432,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
             }
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                userPrefs.performanceMode
-                    .distinctUntilChanged()
-                    .collect { mode ->
-                        com.example.ui.components.ArtworkCacheManager.setPerformanceMode(mode)
-                        _libraryState.update { it.copy(performanceMode = mode) }
-                    }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                e.printStackTrace()
-            }
-        }
     }
 
     fun onPermissionResult(isGranted: Boolean) {
@@ -679,14 +658,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _libraryState.update { it.copy(pauseOnHeadsetUnplug = enabled) }
         viewModelScope.launch {
             userPrefs.setPauseOnHeadsetUnplug(enabled)
-        }
-    }
-
-    fun setPerformanceMode(mode: PerformanceMode) {
-        com.example.ui.components.ArtworkCacheManager.setPerformanceMode(mode)
-        _libraryState.update { it.copy(performanceMode = mode) }
-        viewModelScope.launch {
-            userPrefs.setPerformanceMode(mode)
         }
     }
 

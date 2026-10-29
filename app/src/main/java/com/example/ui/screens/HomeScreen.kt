@@ -234,10 +234,8 @@ fun HomeScreen(
             songs = filteredAllTracks,
             headerItemCount = 3
         )
-        val flingBehavior = com.example.util.rememberPerformanceFlingBehavior()
         LazyColumn(
             state = homeListState,
-            flingBehavior = flingBehavior,
             modifier = modifier
                 .fillMaxSize()
                 .background(HomeBackgroundBrush)
