@@ -56,6 +56,7 @@ class MusicPlayerController(
     private var controller: Player? = initialPlayer
     private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
     private var progressJob: Job? = null
+    private var sleepTimerJob: Job? = null
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -1372,10 +1373,91 @@ class MusicPlayerController(
     }
 
     /**
+     * Configures or cancels the Sleep Timer.
+     * - Uses a single event-driven coroutine delay (zero continuous per-second polling or UI recompositions).
+     * - Also schedules the timer inside [PlaybackService] so it continues working when the app is minimized
+     *   or the device screen is locked.
+     */
+    fun setSleepTimer(minutes: Int, durationMsOverride: Long? = null) {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        val sanitizedMinutes = minutes.coerceAtLeast(0)
+        if (sanitizedMinutes == 0) {
+            PlaybackService.cancelServiceSleepTimer()
+            _uiState.update {
+                if (it.sleepTimerMinutes == 0 && it.sleepTimerEndTimeMs == 0L) {
+                    it
+                } else {
+                    it.copy(sleepTimerMinutes = 0, sleepTimerEndTimeMs = 0L)
+                }
+            }
+            return
+        }
+
+        val durationMs = (durationMsOverride ?: (sanitizedMinutes.toLong() * 60_000L)).coerceAtLeast(1L)
+        val endTimeMs = System.currentTimeMillis() + durationMs
+        _uiState.update {
+            it.copy(
+                sleepTimerMinutes = sanitizedMinutes,
+                sleepTimerEndTimeMs = endTimeMs
+            )
+        }
+
+        PlaybackService.scheduleServiceSleepTimer(durationMs) {
+            onSleepTimerExpired()
+        }
+
+        sleepTimerJob = scope.launch {
+            delay(durationMs)
+            onSleepTimerExpired()
+        }
+    }
+
+    fun cancelSleepTimer() {
+        setSleepTimer(0)
+    }
+
+    internal fun onSleepTimerExpired() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        PlaybackService.pauseForSleepTimer()
+
+        stopProgressUpdate()
+        val player = controller
+        val currentPos = player?.let { resolveEffectivePosition(it) } ?: _uiState.value.positionMs
+        if (player != null) {
+            try {
+                player.playWhenReady = false
+                player.pause()
+            } catch (_: Exception) {
+            }
+        }
+        if (pendingPlayRequest?.autoPlay == true) {
+            pendingPlayRequest = pendingPlayRequest?.copy(autoPlay = false)
+        }
+        _uiState.update {
+            it.copy(
+                isPlaying = false,
+                positionMs = currentPos,
+                sleepTimerMinutes = 0,
+                sleepTimerEndTimeMs = 0L
+            )
+        }
+        saveCurrentPlaybackState(
+            positionOverride = currentPos,
+            isPlayingOverride = false,
+            immediate = true
+        )
+    }
+
+    /**
      * Stops active playback, clears the active MediaController/MediaSession connection,
      * and stops PlaybackService when the task is removed, while preserving saved position and speed.
      */
     fun stopAndReleaseOnTaskRemoved() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        PlaybackService.cancelServiceSleepTimer()
         saveCurrentPlaybackState(isPlayingOverride = false, immediate = true)
         stopProgressUpdate()
         pendingPlayRequest = null
@@ -1408,7 +1490,9 @@ class MusicPlayerController(
         _uiState.update {
             it.copy(
                 isPlaying = false,
-                isBuffering = false
+                isBuffering = false,
+                sleepTimerMinutes = 0,
+                sleepTimerEndTimeMs = 0L
             )
         }
         try {
@@ -1418,6 +1502,9 @@ class MusicPlayerController(
     }
 
     fun release() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        PlaybackService.cancelServiceSleepTimer()
         saveCurrentPlaybackState(immediate = true)
         stopProgressUpdate()
         PlaybackService.unregisterTaskRemovedListener(serviceTaskRemovedListener)

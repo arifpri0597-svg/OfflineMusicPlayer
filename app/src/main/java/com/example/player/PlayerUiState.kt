@@ -19,8 +19,12 @@ data class PlayerUiState(
     val isBuffering: Boolean = false,
     val errorMessage: String? = null,
     val mediaArtworkUriString: String? = null,
-    val artworkBytes: ByteArray? = null
+    val artworkBytes: ByteArray? = null,
+    val sleepTimerMinutes: Int = 0,
+    val sleepTimerEndTimeMs: Long = 0L
 ) {
+    val isSleepTimerActive: Boolean
+        get() = sleepTimerMinutes > 0 && sleepTimerEndTimeMs > 0L
     val progress: Float
         get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 

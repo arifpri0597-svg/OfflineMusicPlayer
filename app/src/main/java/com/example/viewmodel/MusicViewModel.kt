@@ -118,7 +118,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 old.queue === new.queue &&
                 old.errorMessage == new.errorMessage &&
                 old.mediaArtworkUriString == new.mediaArtworkUriString &&
-                old.artworkBytes === new.artworkBytes
+                old.artworkBytes === new.artworkBytes &&
+                old.sleepTimerMinutes == new.sleepTimerMinutes &&
+                old.sleepTimerEndTimeMs == new.sleepTimerEndTimeMs
         }
         .stateIn(
             scope = viewModelScope,

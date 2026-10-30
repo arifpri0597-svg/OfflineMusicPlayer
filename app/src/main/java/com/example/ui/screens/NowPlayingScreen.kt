@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -60,13 +62,18 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -92,10 +99,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -157,6 +166,21 @@ data class TrackMetadataRow(
     val value: String
 )
 
+/**
+ * Reusable menu item model for the top-right Now Playing menu so future features
+ * can be added cleanly without redesigning the Now Playing screen.
+ */
+@Immutable
+data class NowPlayingMenuAction(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val icon: ImageVector,
+    val isHighlighted: Boolean = false,
+    val testTag: String,
+    val onClick: () -> Unit
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingScreen(
@@ -176,6 +200,7 @@ fun NowPlayingScreen(
     onRemoveFromQueue: (Int) -> Unit,
     onJumpToQueueItem: (Int) -> Unit,
     onPlaybackSpeedChange: (Float) -> Unit = {},
+    onSetSleepTimer: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     BackHandler {
@@ -185,6 +210,7 @@ fun NowPlayingScreen(
     var showQueueSheet by remember { mutableStateOf(false) }
     var showPlaybackSpeedSheet by remember { mutableStateOf(false) }
     var showTrackInfoSheet by remember { mutableStateOf(false) }
+    var showSleepTimerSheet by remember { mutableStateOf(false) }
     val song = playerState.currentSong ?: return
 
     val artworkScale by animateFloatAsState(
@@ -199,9 +225,33 @@ fun NowPlayingScreen(
     val onOpenQueue = remember { { showQueueSheet = true } }
     val onOpenPlaybackSpeed = remember { { showPlaybackSpeedSheet = true } }
     val onShowTrackInfo = remember { { showTrackInfoSheet = true } }
+    val onOpenSleepTimer = remember { { showSleepTimerSheet = true } }
     val onRewind10s = remember(onSeekRelative) { { onSeekRelative(-10_000L) } }
     val onForward10s = remember(onSeekRelative) { { onSeekRelative(10_000L) } }
     val onAddCurrentToPlaylist = remember(song, onAddToPlaylist) { { onAddToPlaylist(song) } }
+
+    val menuActions = remember(playerState.sleepTimerMinutes, onShowTrackInfo, onOpenSleepTimer) {
+        listOf(
+            NowPlayingMenuAction(
+                id = "track_info",
+                title = "Track Info",
+                subtitle = null,
+                icon = Icons.Outlined.Info,
+                isHighlighted = false,
+                testTag = "now_playing_menu_track_info",
+                onClick = onShowTrackInfo
+            ),
+            NowPlayingMenuAction(
+                id = "sleep_timer",
+                title = "Sleep Timer",
+                subtitle = if (playerState.sleepTimerMinutes > 0) "${playerState.sleepTimerMinutes} min" else null,
+                icon = Icons.Default.Timer,
+                isHighlighted = playerState.sleepTimerMinutes > 0,
+                testTag = "now_playing_menu_sleep_timer",
+                onClick = onOpenSleepTimer
+            )
+        )
+    }
 
     Box(
         modifier = modifier
@@ -218,11 +268,11 @@ fun NowPlayingScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Top Bar: Back/Collapse button on left, "NOW PLAYING" in center, Queue button on right
+            // 1. Top Bar: Back/Collapse button on left, "NOW PLAYING" in center, reusable 3-dot Menu button on right
             NowPlayingTopBar(
                 songTitle = song.title,
                 onCollapse = onCollapse,
-                onOpenQueue = onOpenQueue
+                menuActions = menuActions
             )
 
             // 2. Large Centered Square Album Artwork (rounded corners, neon border & glow)
@@ -265,12 +315,12 @@ fun NowPlayingScreen(
                 artist = song.artist
             )
 
-            // 4. Action Row: [ ♡ Favorite ] [ + Add to Playlist ] [ ⓘ Track Info ]
+            // 4. Action Row: [ Favorite ]   [ Add to Playlist ]   [ Playback Queue ]
             NowPlayingActionBar(
                 isFavorite = isFavorite,
                 onToggleFavorite = onToggleFavorite,
                 onAddToPlaylist = onAddCurrentToPlaylist,
-                onShowTrackInfo = onShowTrackInfo
+                onOpenQueue = onOpenQueue
             )
 
             // 5. Progress Bar (Seek bar, Current time left, Total duration right)
@@ -462,6 +512,309 @@ fun NowPlayingScreen(
                 )
             }
         }
+
+        // Sleep Timer Modal Bottom Sheet
+        if (showSleepTimerSheet) {
+            val sleepSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = { showSleepTimerSheet = false },
+                sheetState = sleepSheetState,
+                shape = BottomSheetTopCornerShape,
+                containerColor = Color(0xFF140826),
+                modifier = Modifier.testTag("sleep_timer_bottom_sheet")
+            ) {
+                SleepTimerBottomSheetContent(
+                    currentMinutes = playerState.sleepTimerMinutes,
+                    onSelectSleepTimer = { selectedMinutes ->
+                        onSetSleepTimer(selectedMinutes)
+                    },
+                    onDismiss = { showSleepTimerSheet = false }
+                )
+            }
+        }
+    }
+}
+
+private data class SleepTimerPresetItem(
+    val minutes: Int,
+    val label: String,
+    val subtitle: String,
+    val testTag: String
+)
+
+private val SLEEP_TIMER_PRESETS = listOf(
+    SleepTimerPresetItem(0, "Off", "Disable sleep timer", "sleep_timer_option_off"),
+    SleepTimerPresetItem(15, "15 minutes", "Stop playback after 15 min", "sleep_timer_option_15"),
+    SleepTimerPresetItem(30, "30 minutes", "Stop playback after 30 min", "sleep_timer_option_30"),
+    SleepTimerPresetItem(45, "45 minutes", "Stop playback after 45 min", "sleep_timer_option_45"),
+    SleepTimerPresetItem(60, "60 minutes", "Stop playback after 60 min", "sleep_timer_option_60")
+)
+
+@Composable
+private fun SleepTimerBottomSheetContent(
+    currentMinutes: Int,
+    onSelectSleepTimer: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isPresetMatch = SLEEP_TIMER_PRESETS.any { it.minutes == currentMinutes }
+    var isCustomExpanded by remember { mutableStateOf(currentMinutes > 0 && !isPresetMatch) }
+    var customMinutesText by remember {
+        mutableStateOf(if (currentMinutes > 0 && !isPresetMatch) currentMinutes.toString() else "20")
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = NeonPink.copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.45f)),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = NeonPinkLight,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "Sleep Timer",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = if (currentMinutes > 0) "Active: $currentMinutes minutes" else "Off",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NeonPinkLight
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("sleep_timer_close_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close sleep timer",
+                    tint = Color.White
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            for (preset in SLEEP_TIMER_PRESETS) {
+                val isSelected = !isCustomExpanded && currentMinutes == preset.minutes
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable {
+                            isCustomExpanded = false
+                            onSelectSleepTimer(preset.minutes)
+                            onDismiss()
+                        }
+                        .testTag(preset.testTag),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) {
+                        NeonPink.copy(alpha = 0.20f)
+                    } else {
+                        Color(0xFF211038).copy(alpha = 0.72f)
+                    },
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) NeonPink else NeonPurple.copy(alpha = 0.28f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = preset.label,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) NeonPinkLight else Color.White
+                            )
+                            Text(
+                                text = preset.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (isSelected) {
+                            Surface(
+                                shape = CircleShape,
+                                color = NeonPink,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected sleep timer",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Custom Option
+            val isCustomSelected = isCustomExpanded || (currentMinutes > 0 && !isPresetMatch)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable {
+                        isCustomExpanded = true
+                    }
+                    .testTag("sleep_timer_option_custom"),
+                shape = RoundedCornerShape(16.dp),
+                color = if (isCustomSelected) {
+                    NeonPink.copy(alpha = 0.20f)
+                } else {
+                    Color(0xFF211038).copy(alpha = 0.72f)
+                },
+                border = BorderStroke(
+                    width = if (isCustomSelected) 1.5.dp else 1.dp,
+                    color = if (isCustomSelected) NeonPink else NeonPurple.copy(alpha = 0.28f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Custom",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isCustomSelected) NeonPinkLight else Color.White
+                            )
+                            Text(
+                                text = if (currentMinutes > 0 && !isPresetMatch) {
+                                    "Custom timer: $currentMinutes minutes"
+                                } else {
+                                    "Set custom duration in minutes"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isCustomSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (currentMinutes > 0 && !isPresetMatch) {
+                            Surface(
+                                shape = CircleShape,
+                                color = NeonPink,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected custom sleep timer",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (isCustomExpanded) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = customMinutesText,
+                                onValueChange = { input ->
+                                    val filtered = input.filter { it.isDigit() }.take(3)
+                                    customMinutesText = filtered
+                                },
+                                label = { Text("Minutes (1–720)") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonPink,
+                                    unfocusedBorderColor = NeonPurple.copy(alpha = 0.5f),
+                                    focusedLabelColor = NeonPinkLight,
+                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("sleep_timer_custom_input")
+                            )
+
+                            Surface(
+                                modifier = Modifier
+                                    .clip(PillShape)
+                                    .clickable {
+                                        val parsed = customMinutesText.toIntOrNull()?.coerceIn(1, 720) ?: 0
+                                        if (parsed > 0) {
+                                            onSelectSleepTimer(parsed)
+                                            onDismiss()
+                                        }
+                                    }
+                                    .testTag("sleep_timer_custom_confirm_btn"),
+                                shape = PillShape,
+                                color = NeonPink
+                            ) {
+                                Text(
+                                    text = "Start",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 
@@ -1077,8 +1430,10 @@ private fun formatAudioFormatLabel(fileName: String?, mimeType: String?): String
 private fun NowPlayingTopBar(
     songTitle: String,
     onCollapse: () -> Unit,
-    onOpenQueue: () -> Unit
+    menuActions: List<NowPlayingMenuAction>
 ) {
+    var isMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1126,22 +1481,68 @@ private fun NowPlayingTopBar(
             )
         }
 
-        Surface(
-            shape = CircleShape,
-            color = Color(0xFF221238).copy(alpha = 0.75f),
-            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f)),
-            modifier = Modifier.size(44.dp)
-        ) {
-            IconButton(
-                onClick = onOpenQueue,
-                modifier = Modifier.testTag("now_playing_queue_btn")
+        Box {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF221238).copy(alpha = 0.75f),
+                border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f)),
+                modifier = Modifier.size(44.dp)
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.QueueMusic,
-                    contentDescription = "Open Queue",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+                IconButton(
+                    onClick = { isMenuExpanded = true },
+                    modifier = Modifier.testTag("now_playing_menu_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = isMenuExpanded,
+                onDismissRequest = { isMenuExpanded = false },
+                shape = RoundedCornerShape(16.dp),
+                containerColor = Color(0xFF1A0B30),
+                border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.42f)),
+                modifier = Modifier.testTag("now_playing_top_menu")
+            ) {
+                for (action in menuActions) {
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text = action.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (action.isHighlighted) NeonPinkLight else Color.White
+                                )
+                                if (!action.subtitle.isNullOrBlank()) {
+                                    Text(
+                                        text = action.subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonPinkLight
+                                    )
+                                }
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = action.icon,
+                                contentDescription = null,
+                                tint = if (action.isHighlighted) NeonPink else NeonPinkLight,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        onClick = {
+                            isMenuExpanded = false
+                            action.onClick()
+                        },
+                        modifier = Modifier.testTag(action.testTag)
+                    )
+                }
             }
         }
     }
@@ -1244,15 +1645,15 @@ private fun NowPlayingTrackMetadata(
 }
 
 /**
- * Balanced 3-button action row below Artist name:
- * [ ♡ Favorite ] [ + Add to Playlist ] [ ⓘ Track Info ]
+ * Balanced 3-button action row below Artist name matching the second reference image:
+ * [ Favorite ]   [ Add to Playlist ]   [ Playback Queue ]
  */
 @Composable
 private fun NowPlayingActionBar(
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    onShowTrackInfo: () -> Unit
+    onOpenQueue: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1277,7 +1678,7 @@ private fun NowPlayingActionBar(
             )
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -1292,7 +1693,8 @@ private fun NowPlayingActionBar(
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isFavorite) NeonPinkLight else Color.White,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
@@ -1308,7 +1710,7 @@ private fun NowPlayingActionBar(
             border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.38f))
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -1323,38 +1725,40 @@ private fun NowPlayingActionBar(
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }
 
-        // 3. Track Info Pill Button
+        // 3. Playback Queue Pill Button
         Surface(
             modifier = Modifier
                 .clip(PillShape)
-                .clickable(onClick = onShowTrackInfo)
-                .testTag("now_playing_track_info_btn"),
+                .clickable(onClick = onOpenQueue)
+                .testTag("now_playing_queue_btn"),
             shape = PillShape,
             color = Color(0xFF221238).copy(alpha = 0.72f),
             border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.38f))
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Info,
-                    contentDescription = "Track Info",
+                    imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = "Playback Queue",
                     tint = NeonPinkLight,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(5.dp))
                 Text(
-                    text = "Track Info",
+                    text = "Playback Queue",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }

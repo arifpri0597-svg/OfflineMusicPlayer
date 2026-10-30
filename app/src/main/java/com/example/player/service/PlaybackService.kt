@@ -47,6 +47,7 @@ class PlaybackService : MediaSessionService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var periodicSaveJob: Job? = null
+    private var serviceSleepTimerJob: Job? = null
     private var lastSavedPositionMs: Long = -1L
     private var lastSavedSongId: Long = -1L
     private var isRestoringState: Boolean = false
@@ -121,6 +122,9 @@ class PlaybackService : MediaSessionService() {
         var isServiceRunning: Boolean = false
             internal set
 
+        @Volatile
+        private var activeInstance: PlaybackService? = null
+
         private val taskRemovedListeners = CopyOnWriteArraySet<() -> Unit>()
 
         fun registerTaskRemovedListener(listener: () -> Unit) {
@@ -139,6 +143,18 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         }
+
+        fun scheduleServiceSleepTimer(durationMs: Long, onExpired: (() -> Unit)? = null) {
+            activeInstance?.scheduleInternalSleepTimer(durationMs, onExpired)
+        }
+
+        fun cancelServiceSleepTimer() {
+            activeInstance?.cancelInternalSleepTimer()
+        }
+
+        fun pauseForSleepTimer() {
+            activeInstance?.pausePlaybackForSleepTimer()
+        }
     }
 
     @OptIn(UnstableApi::class)
@@ -147,6 +163,7 @@ class PlaybackService : MediaSessionService() {
         hasHandledTaskRemoval = false
         isPlayerReleased = false
         isServiceRunning = true
+        activeInstance = this
         createNotificationChannel()
 
         val audioAttributes = AudioAttributes.Builder()
@@ -349,6 +366,35 @@ class PlaybackService : MediaSessionService() {
         periodicSaveJob = null
     }
 
+    internal fun scheduleInternalSleepTimer(durationMs: Long, onExpired: (() -> Unit)? = null) {
+        serviceSleepTimerJob?.cancel()
+        serviceSleepTimerJob = null
+        if (durationMs <= 0L || hasHandledTaskRemoval || isPlayerReleased) return
+        serviceSleepTimerJob = serviceScope.launch {
+            delay(durationMs)
+            pausePlaybackForSleepTimer()
+            onExpired?.invoke()
+        }
+    }
+
+    internal fun cancelInternalSleepTimer() {
+        serviceSleepTimerJob?.cancel()
+        serviceSleepTimerJob = null
+    }
+
+    internal fun pausePlaybackForSleepTimer() {
+        cancelInternalSleepTimer()
+        if (hasHandledTaskRemoval || isPlayerReleased || !::player.isInitialized) return
+        try {
+            stopPeriodicPositionSave()
+            val pos = max(0L, player.currentPosition)
+            player.playWhenReady = false
+            player.pause()
+            persistPlayerState(positionOverride = pos, isPlayingOverride = false, immediate = true)
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         if (hasHandledTaskRemoval || isPlayerReleased) return null
         return mediaSession
@@ -371,9 +417,13 @@ class PlaybackService : MediaSessionService() {
         }
         hasHandledTaskRemoval = true
         isServiceRunning = false
+        if (activeInstance === this) {
+            activeInstance = null
+        }
 
-        // 1. Stop periodic position save coroutine
+        // 1. Stop periodic position save coroutine and sleep timer
         stopPeriodicPositionSave()
+        cancelInternalSleepTimer()
 
         // 2. Persist current song, position, and playback speed (with isPlaying = false) before clearing player
         persistPlayerState(isPlayingOverride = false, immediate = true)
@@ -443,7 +493,11 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         isServiceRunning = false
+        if (activeInstance === this) {
+            activeInstance = null
+        }
         stopPeriodicPositionSave()
+        cancelInternalSleepTimer()
         if (!hasHandledTaskRemoval) {
             persistPlayerState(isPlayingOverride = false, immediate = true)
         }

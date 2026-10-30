@@ -704,6 +704,7 @@ private fun NowPlayingOverlaySection(
     val onRemoveFromQueue = remember(viewModel) { { idx: Int -> viewModel.playerController.removeFromQueue(idx) } }
     val onJumpToQueueItem = remember(viewModel) { { idx: Int -> viewModel.playerController.jumpToQueueItem(idx) } }
     val onPlaybackSpeedChange = remember(viewModel) { { speed: Float -> viewModel.playerController.setPlaybackSpeed(speed) } }
+    val onSetSleepTimer = remember(viewModel) { { minutes: Int -> viewModel.playerController.setSleepTimer(minutes) } }
 
     AnimatedVisibility(
         visible = isExpanded,
@@ -738,7 +739,8 @@ private fun NowPlayingOverlaySection(
             onAddToPlaylist = onAddToPlaylist,
             onRemoveFromQueue = onRemoveFromQueue,
             onJumpToQueueItem = onJumpToQueueItem,
-            onPlaybackSpeedChange = onPlaybackSpeedChange
+            onPlaybackSpeedChange = onPlaybackSpeedChange,
+            onSetSleepTimer = onSetSleepTimer
         )
     }
 }

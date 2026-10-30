@@ -744,7 +744,7 @@ class PlaybackServiceTest {
         reopenedController.release()
     }
 
-    private class FakePlayerHarness {
+    internal class FakePlayerHarness {
         val listeners = mutableListOf<Player.Listener>()
         val mediaItems = mutableListOf<MediaItem>()
         var currentMediaItemIndex: Int = 0
