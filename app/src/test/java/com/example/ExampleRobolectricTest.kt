@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -802,34 +803,46 @@ class ExampleRobolectricTest {
             // 1. Verify standalone Track button is REMOVED from the action row
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_track_info_btn")).assertDoesNotExist()
 
-            // 2. Verify Favorite, Add to Playlist, and Playback Queue are together in the action row
+            // 2. Verify Sleep Timer clock button/sticker + compact icon-only Favorite, Add to Playlist, and Playback Queue are in the action row
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_sleep_timer_btn")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_favorite_btn")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_add_playlist_btn")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_queue_btn")).assertExists()
 
-            // 3. Verify top-right menu button exists and opens menu with Track Info & Sleep Timer
+            // 3. Verify top-right menu button exists and opens menu with Track Info, Sleep Timer & Playback Speed
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_menu_btn")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_menu_btn")).performClick()
             composeTestRule.waitForIdle()
 
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_menu_track_info")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_menu_sleep_timer")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_menu_playback_speed")).assertExists()
 
-            // 4. Verify clicking Sleep Timer opens the Sleep Timer bottom sheet with all required options
+            // 4. Verify clicking Sleep Timer opens the Sleep Timer bottom sheet with all required options (Off, 5, 10, 15, 30, 45, 60, End of current track)
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_menu_sleep_timer")).performClick()
             composeTestRule.waitForIdle()
 
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_bottom_sheet")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_off")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_5")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_10")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_15")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_30")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_45")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_60")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_end_of_track")).assertExists()
             composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_custom")).assertExists()
 
-            // Select 15 minutes option
-            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_15")).performClick()
+            // Select 15 minutes option and verify active remaining badge on the Sleep Timer sticker
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_15"))
+                .performScrollTo()
+                .performClick()
             composeTestRule.waitForIdle()
+
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("now_playing_sleep_timer_badge"),
+                useUnmergedTree = true
+            ).assertExists()
 
             scenario.onActivity { activity ->
                 val vm = androidx.lifecycle.ViewModelProvider(activity)[com.example.viewmodel.MusicViewModel::class.java]
@@ -837,9 +850,41 @@ class ExampleRobolectricTest {
                 assertTrue(vm.playerController.uiState.value.isSleepTimerActive)
             }
 
-            // 5. Verify Sleep Timer expiration safely pauses playback, resets timer, and preserves song/queue/position
+            // Also verify tapping the compact Sleep Timer clock sticker opens the Sleep Timer bottom sheet
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("now_playing_sleep_timer_btn")).performClick()
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_bottom_sheet")).assertExists()
+
+            // Select "End of current track" option and verify it pauses when the current track transitions automatically
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("sleep_timer_option_end_of_track"))
+                .performScrollTo()
+                .performClick()
+            composeTestRule.waitForIdle()
+
             scenario.onActivity { activity ->
                 val vm = androidx.lifecycle.ViewModelProvider(activity)[com.example.viewmodel.MusicViewModel::class.java]
+                assertEquals(PlayerUiState.SLEEP_TIMER_END_OF_TRACK, vm.playerController.uiState.value.sleepTimerMinutes)
+                assertTrue(vm.playerController.uiState.value.isSleepTimerActive)
+                assertTrue(vm.playerController.uiState.value.isSleepTimerEndOfTrack)
+
+                // Simulate end of current track (MEDIA_ITEM_TRANSITION_REASON_AUTO)
+                fakeHarness.listeners.toList().forEach {
+                    it.onMediaItemTransition(
+                        fakeHarness.mediaItems.getOrNull(1),
+                        androidx.media3.common.Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+                    )
+                }
+
+                val stateAfterEndOfTrack = vm.playerController.uiState.value
+                assertFalse("Playback should pause at end of current track", stateAfterEndOfTrack.isPlaying)
+                assertEquals("Sleep timer should reset to Off after end of track", 0, stateAfterEndOfTrack.sleepTimerMinutes)
+                assertFalse(stateAfterEndOfTrack.isSleepTimerActive)
+            }
+
+            // 5. Verify timed Sleep Timer expiration safely pauses playback, resets timer, and preserves song/queue/position
+            scenario.onActivity { activity ->
+                val vm = androidx.lifecycle.ViewModelProvider(activity)[com.example.viewmodel.MusicViewModel::class.java]
+                vm.playerController.togglePlayPause() // resume playback
                 vm.playerController.setSleepTimer(minutes = 15, durationMsOverride = 60L)
             }
 

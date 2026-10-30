@@ -48,6 +48,10 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var periodicSaveJob: Job? = null
     private var serviceSleepTimerJob: Job? = null
+    @Volatile
+    private var sleepTimerStopAtEndOfTrack: Boolean = false
+    @Volatile
+    private var sleepTimerEndOfTrackCallback: (() -> Unit)? = null
     private var lastSavedPositionMs: Long = -1L
     private var lastSavedSongId: Long = -1L
     private var isRestoringState: Boolean = false
@@ -94,6 +98,17 @@ class PlaybackService : MediaSessionService() {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
+            if (sleepTimerStopAtEndOfTrack &&
+                (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+            ) {
+                val callback = sleepTimerEndOfTrackCallback
+                sleepTimerStopAtEndOfTrack = false
+                sleepTimerEndOfTrackCallback = null
+                pausePlaybackForSleepTimer()
+                callback?.invoke()
+                return
+            }
             if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                 restoredFloorPositionMs = null
                 persistPlayerState(immediate = true)
@@ -107,6 +122,14 @@ class PlaybackService : MediaSessionService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (isRestoringState || hasHandledTaskRemoval || isPlayerReleased) return
+            if (sleepTimerStopAtEndOfTrack && playbackState == Player.STATE_ENDED) {
+                val callback = sleepTimerEndOfTrackCallback
+                sleepTimerStopAtEndOfTrack = false
+                sleepTimerEndOfTrackCallback = null
+                pausePlaybackForSleepTimer()
+                callback?.invoke()
+                return
+            }
             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_READY) {
                 persistPlayerState(immediate = false)
             }
@@ -146,6 +169,10 @@ class PlaybackService : MediaSessionService() {
 
         fun scheduleServiceSleepTimer(durationMs: Long, onExpired: (() -> Unit)? = null) {
             activeInstance?.scheduleInternalSleepTimer(durationMs, onExpired)
+        }
+
+        fun setServiceSleepTimerEndOfTrack(enabled: Boolean, onExpired: (() -> Unit)? = null) {
+            activeInstance?.setInternalSleepTimerEndOfTrack(enabled, onExpired)
         }
 
         fun cancelServiceSleepTimer() {
@@ -369,6 +396,8 @@ class PlaybackService : MediaSessionService() {
     internal fun scheduleInternalSleepTimer(durationMs: Long, onExpired: (() -> Unit)? = null) {
         serviceSleepTimerJob?.cancel()
         serviceSleepTimerJob = null
+        sleepTimerStopAtEndOfTrack = false
+        sleepTimerEndOfTrackCallback = null
         if (durationMs <= 0L || hasHandledTaskRemoval || isPlayerReleased) return
         serviceSleepTimerJob = serviceScope.launch {
             delay(durationMs)
@@ -377,9 +406,23 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    internal fun setInternalSleepTimerEndOfTrack(enabled: Boolean, onExpired: (() -> Unit)? = null) {
+        serviceSleepTimerJob?.cancel()
+        serviceSleepTimerJob = null
+        if (!enabled || hasHandledTaskRemoval || isPlayerReleased) {
+            sleepTimerStopAtEndOfTrack = false
+            sleepTimerEndOfTrackCallback = null
+            return
+        }
+        sleepTimerStopAtEndOfTrack = true
+        sleepTimerEndOfTrackCallback = onExpired
+    }
+
     internal fun cancelInternalSleepTimer() {
         serviceSleepTimerJob?.cancel()
         serviceSleepTimerJob = null
+        sleepTimerStopAtEndOfTrack = false
+        sleepTimerEndOfTrackCallback = null
     }
 
     internal fun pausePlaybackForSleepTimer() {

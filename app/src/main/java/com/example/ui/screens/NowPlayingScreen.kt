@@ -37,9 +37,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -230,7 +233,23 @@ fun NowPlayingScreen(
     val onForward10s = remember(onSeekRelative) { { onSeekRelative(10_000L) } }
     val onAddCurrentToPlaylist = remember(song, onAddToPlaylist) { { onAddToPlaylist(song) } }
 
-    val menuActions = remember(playerState.sleepTimerMinutes, onShowTrackInfo, onOpenSleepTimer) {
+    val sleepTimerBadge = remember(playerState.sleepTimerMinutes, playerState.sleepTimerEndTimeMs) {
+        playerState.formatSleepTimerRemainingBadge()
+    }
+    val sleepTimerActiveDescription = remember(playerState.sleepTimerMinutes, playerState.sleepTimerEndTimeMs) {
+        playerState.formatSleepTimerActiveDescription()
+    }
+
+    val menuActions = remember(
+        playerState.sleepTimerMinutes,
+        playerState.sleepTimerEndTimeMs,
+        playerState.playbackSpeed,
+        sleepTimerBadge,
+        onShowTrackInfo,
+        onOpenSleepTimer,
+        onOpenPlaybackSpeed
+    ) {
+        val isCustomSpeed = abs(playerState.playbackSpeed - 1.0f) >= 0.01f
         listOf(
             NowPlayingMenuAction(
                 id = "track_info",
@@ -244,11 +263,20 @@ fun NowPlayingScreen(
             NowPlayingMenuAction(
                 id = "sleep_timer",
                 title = "Sleep Timer",
-                subtitle = if (playerState.sleepTimerMinutes > 0) "${playerState.sleepTimerMinutes} min" else null,
+                subtitle = sleepTimerBadge,
                 icon = Icons.Default.Timer,
-                isHighlighted = playerState.sleepTimerMinutes > 0,
+                isHighlighted = playerState.isSleepTimerActive,
                 testTag = "now_playing_menu_sleep_timer",
                 onClick = onOpenSleepTimer
+            ),
+            NowPlayingMenuAction(
+                id = "playback_speed",
+                title = "Playback Speed",
+                subtitle = playerState.formattedPlaybackSpeed,
+                icon = Icons.Default.Speed,
+                isHighlighted = isCustomSpeed,
+                testTag = "now_playing_menu_playback_speed",
+                onClick = onOpenPlaybackSpeed
             )
         )
     }
@@ -315,9 +343,12 @@ fun NowPlayingScreen(
                 artist = song.artist
             )
 
-            // 4. Action Row: [ Favorite ]   [ Add to Playlist ]   [ Playback Queue ]
+            // 4. Compact Action Row: [ Sleep Timer Clock Sticker ]  [ ❤️ ]  [ Playlist + ]  [ Queue ]
             NowPlayingActionBar(
                 isFavorite = isFavorite,
+                isSleepTimerActive = playerState.isSleepTimerActive,
+                sleepTimerBadge = sleepTimerBadge,
+                onOpenSleepTimer = onOpenSleepTimer,
                 onToggleFavorite = onToggleFavorite,
                 onAddToPlaylist = onAddCurrentToPlaylist,
                 onOpenQueue = onOpenQueue
@@ -525,6 +556,7 @@ fun NowPlayingScreen(
             ) {
                 SleepTimerBottomSheetContent(
                     currentMinutes = playerState.sleepTimerMinutes,
+                    activeStatusText = sleepTimerActiveDescription,
                     onSelectSleepTimer = { selectedMinutes ->
                         onSetSleepTimer(selectedMinutes)
                     },
@@ -543,16 +575,60 @@ private data class SleepTimerPresetItem(
 )
 
 private val SLEEP_TIMER_PRESETS = listOf(
-    SleepTimerPresetItem(0, "Off", "Disable sleep timer", "sleep_timer_option_off"),
-    SleepTimerPresetItem(15, "15 minutes", "Stop playback after 15 min", "sleep_timer_option_15"),
-    SleepTimerPresetItem(30, "30 minutes", "Stop playback after 30 min", "sleep_timer_option_30"),
-    SleepTimerPresetItem(45, "45 minutes", "Stop playback after 45 min", "sleep_timer_option_45"),
-    SleepTimerPresetItem(60, "60 minutes", "Stop playback after 60 min", "sleep_timer_option_60")
+    SleepTimerPresetItem(
+        minutes = PlayerUiState.SLEEP_TIMER_OFF,
+        label = "Off",
+        subtitle = "Disable sleep timer",
+        testTag = "sleep_timer_option_off"
+    ),
+    SleepTimerPresetItem(
+        minutes = 5,
+        label = "5 minutes",
+        subtitle = "Stop playback after 5 min",
+        testTag = "sleep_timer_option_5"
+    ),
+    SleepTimerPresetItem(
+        minutes = 10,
+        label = "10 minutes",
+        subtitle = "Stop playback after 10 min",
+        testTag = "sleep_timer_option_10"
+    ),
+    SleepTimerPresetItem(
+        minutes = 15,
+        label = "15 minutes",
+        subtitle = "Stop playback after 15 min",
+        testTag = "sleep_timer_option_15"
+    ),
+    SleepTimerPresetItem(
+        minutes = 30,
+        label = "30 minutes",
+        subtitle = "Stop playback after 30 min",
+        testTag = "sleep_timer_option_30"
+    ),
+    SleepTimerPresetItem(
+        minutes = 45,
+        label = "45 minutes",
+        subtitle = "Stop playback after 45 min",
+        testTag = "sleep_timer_option_45"
+    ),
+    SleepTimerPresetItem(
+        minutes = 60,
+        label = "60 minutes",
+        subtitle = "Stop playback after 60 min",
+        testTag = "sleep_timer_option_60"
+    ),
+    SleepTimerPresetItem(
+        minutes = PlayerUiState.SLEEP_TIMER_END_OF_TRACK,
+        label = "End of current track",
+        subtitle = "Pause playback when current song finishes",
+        testTag = "sleep_timer_option_end_of_track"
+    )
 )
 
 @Composable
 private fun SleepTimerBottomSheetContent(
     currentMinutes: Int,
+    activeStatusText: String,
     onSelectSleepTimer: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -601,9 +677,10 @@ private fun SleepTimerBottomSheetContent(
                         color = Color.White
                     )
                     Text(
-                        text = if (currentMinutes > 0) "Active: $currentMinutes minutes" else "Off",
+                        text = activeStatusText,
                         style = MaterialTheme.typography.bodySmall,
-                        color = NeonPinkLight
+                        color = NeonPinkLight,
+                        modifier = Modifier.testTag("sleep_timer_active_status")
                     )
                 }
             }
@@ -623,22 +700,25 @@ private fun SleepTimerBottomSheetContent(
         Spacer(modifier = Modifier.height(4.dp))
 
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             for (preset in SLEEP_TIMER_PRESETS) {
                 val isSelected = !isCustomExpanded && currentMinutes == preset.minutes
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .clickable {
                             isCustomExpanded = false
                             onSelectSleepTimer(preset.minutes)
                             onDismiss()
                         }
                         .testTag(preset.testTag),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = if (isSelected) {
                         NeonPink.copy(alpha = 0.20f)
                     } else {
@@ -652,7 +732,7 @@ private fun SleepTimerBottomSheetContent(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1645,121 +1725,165 @@ private fun NowPlayingTrackMetadata(
 }
 
 /**
- * Balanced 3-button action row below Artist name matching the second reference image:
- * [ Favorite ]   [ Add to Playlist ]   [ Playback Queue ]
+ * Compact horizontal action row below Artist name matching the reference image:
+ * - Left: Small compact Sleep Timer clock icon button/sticker (indicates remaining timer when active)
+ * - Icon-only compact buttons (no text labels):
+ *   [ 🕒 Sleep Timer ]   [ ❤️ Favorite ]   [ Playlist + ]   [ Playback Queue ]
  */
 @Composable
 private fun NowPlayingActionBar(
     isFavorite: Boolean,
+    isSleepTimerActive: Boolean,
+    sleepTimerBadge: String?,
+    onOpenSleepTimer: () -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onOpenQueue: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Favorite Pill Button
-        Surface(
-            modifier = Modifier
-                .clip(PillShape)
-                .clickable(onClick = onToggleFavorite)
-                .testTag("now_playing_favorite_btn"),
-            shape = PillShape,
-            color = if (isFavorite) {
-                NeonPink.copy(alpha = 0.22f)
-            } else {
-                Color(0xFF221238).copy(alpha = 0.72f)
-            },
-            border = BorderStroke(
-                1.dp,
-                if (isFavorite) NeonPink else NeonPurple.copy(alpha = 0.38f)
-            )
+        // 1. Compact Sleep Timer Clock Icon Button / Sticker on the left side of the action row
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.minimumInteractiveComponentSize()
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Surface(
+                modifier = Modifier
+                    .height(38.dp)
+                    .clip(PillShape)
+                    .clickable(onClick = onOpenSleepTimer)
+                    .testTag("now_playing_sleep_timer_btn"),
+                shape = PillShape,
+                color = if (isSleepTimerActive) {
+                    NeonPink.copy(alpha = 0.22f)
+                } else {
+                    Color(0xFF211037).copy(alpha = 0.72f)
+                },
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isSleepTimerActive) NeonPink else NeonPurple.copy(alpha = 0.42f)
+                )
             ) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = if (isFavorite) NeonPink else Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Favorite",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (isFavorite) NeonPinkLight else Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    softWrap = false
-                )
+                Row(
+                    modifier = Modifier.padding(
+                        horizontal = if (isSleepTimerActive && !sleepTimerBadge.isNullOrBlank()) 11.dp else 10.dp
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = if (isSleepTimerActive && !sleepTimerBadge.isNullOrBlank()) {
+                            "Sleep Timer ($sleepTimerBadge)"
+                        } else {
+                            "Sleep Timer"
+                        },
+                        tint = if (isSleepTimerActive) NeonPink else NeonPinkLight,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    if (isSleepTimerActive && !sleepTimerBadge.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = sleepTimerBadge,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeonPinkLight,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.testTag("now_playing_sleep_timer_badge")
+                        )
+                    }
+                }
             }
         }
 
-        // 2. Add to Playlist Pill Button
-        Surface(
-            modifier = Modifier
-                .clip(PillShape)
-                .clickable(onClick = onAddToPlaylist)
-                .testTag("now_playing_add_playlist_btn"),
-            shape = PillShape,
-            color = Color(0xFF221238).copy(alpha = 0.72f),
-            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.38f))
+        // 2. Favorite Icon-Only Compact Button (❤️)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.minimumInteractiveComponentSize()
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Surface(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleFavorite)
+                    .testTag("now_playing_favorite_btn"),
+                shape = CircleShape,
+                color = if (isFavorite) {
+                    NeonPink.copy(alpha = 0.22f)
+                } else {
+                    Color(0xFF211037).copy(alpha = 0.72f)
+                },
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isFavorite) NeonPink else NeonPurple.copy(alpha = 0.42f)
+                )
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-                    contentDescription = "Add to Playlist",
-                    tint = NeonPinkLight,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Add to Playlist",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    softWrap = false
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        tint = if (isFavorite) NeonPink else NeonPinkLight,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
 
-        // 3. Playback Queue Pill Button
-        Surface(
-            modifier = Modifier
-                .clip(PillShape)
-                .clickable(onClick = onOpenQueue)
-                .testTag("now_playing_queue_btn"),
-            shape = PillShape,
-            color = Color(0xFF221238).copy(alpha = 0.72f),
-            border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.38f))
+        // 3. Add to Playlist Icon-Only Compact Button (Playlist +)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.minimumInteractiveComponentSize()
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Surface(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onAddToPlaylist)
+                    .testTag("now_playing_add_playlist_btn"),
+                shape = CircleShape,
+                color = Color(0xFF211037).copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.42f))
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.QueueMusic,
-                    contentDescription = "Playback Queue",
-                    tint = NeonPinkLight,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Playback Queue",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    softWrap = false
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                        contentDescription = "Add to Playlist",
+                        tint = NeonPinkLight,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
+        }
+
+        // 4. Playback Queue Icon-Only Compact Button (Queue / music-list icon)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.minimumInteractiveComponentSize()
+        ) {
+            Surface(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenQueue)
+                    .testTag("now_playing_queue_btn"),
+                shape = CircleShape,
+                color = Color(0xFF211037).copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.42f))
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "Playback Queue",
+                        tint = NeonPinkLight,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

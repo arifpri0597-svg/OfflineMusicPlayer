@@ -125,12 +125,27 @@ class MusicPlayerController(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (_uiState.value.sleepTimerMinutes == PlayerUiState.SLEEP_TIMER_END_OF_TRACK &&
+                playbackState == Player.STATE_ENDED
+            ) {
+                onSleepTimerExpired()
+                return
+            }
             val isBuffering = playbackState == Player.STATE_BUFFERING
             _uiState.update { it.copy(isBuffering = isBuffering) }
             syncStateFromPlayer()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (!isApplyingRestoredPlayerState &&
+                _uiState.value.sleepTimerMinutes == PlayerUiState.SLEEP_TIMER_END_OF_TRACK &&
+                (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+            ) {
+                syncStateFromPlayer()
+                onSleepTimerExpired()
+                return
+            }
             if (!isApplyingRestoredPlayerState && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                 isRestoredPausedState = false
                 restoredPositionFloorMs = null
@@ -1158,13 +1173,7 @@ class MusicPlayerController(
         lastSavedSongId = currentSong.id
         lastSavedPositionMs = clampedPosition
 
-        if (immediate) {
-            repo.savePlaybackStateImmediate(entity)
-        } else {
-            scope.launch(Dispatchers.IO) {
-                repo.savePlaybackState(entity)
-            }
-        }
+        repo.savePlaybackStateImmediate(entity)
     }
 
     private fun resolveEffectivePosition(player: Player): Long {
@@ -1381,6 +1390,19 @@ class MusicPlayerController(
     fun setSleepTimer(minutes: Int, durationMsOverride: Long? = null) {
         sleepTimerJob?.cancel()
         sleepTimerJob = null
+        if (minutes == PlayerUiState.SLEEP_TIMER_END_OF_TRACK) {
+            PlaybackService.setServiceSleepTimerEndOfTrack(true) {
+                onSleepTimerExpired()
+            }
+            _uiState.update {
+                it.copy(
+                    sleepTimerMinutes = PlayerUiState.SLEEP_TIMER_END_OF_TRACK,
+                    sleepTimerEndTimeMs = 0L
+                )
+            }
+            return
+        }
+
         val sanitizedMinutes = minutes.coerceAtLeast(0)
         if (sanitizedMinutes == 0) {
             PlaybackService.cancelServiceSleepTimer()

@@ -23,8 +23,36 @@ data class PlayerUiState(
     val sleepTimerMinutes: Int = 0,
     val sleepTimerEndTimeMs: Long = 0L
 ) {
+    val isSleepTimerEndOfTrack: Boolean
+        get() = sleepTimerMinutes == SLEEP_TIMER_END_OF_TRACK
+
     val isSleepTimerActive: Boolean
-        get() = sleepTimerMinutes > 0 && sleepTimerEndTimeMs > 0L
+        get() = (sleepTimerMinutes > 0 && sleepTimerEndTimeMs > 0L) || isSleepTimerEndOfTrack
+
+    fun formatSleepTimerRemainingBadge(nowMs: Long = System.currentTimeMillis()): String? {
+        if (!isSleepTimerActive) return null
+        if (isSleepTimerEndOfTrack) return "End of track"
+        val remainingMs = (sleepTimerEndTimeMs - nowMs).coerceAtLeast(0L)
+        val remainingMin = if (remainingMs > 0L) {
+            ((remainingMs + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
+        } else {
+            sleepTimerMinutes.coerceAtLeast(1)
+        }
+        return "${remainingMin}m"
+    }
+
+    fun formatSleepTimerActiveDescription(nowMs: Long = System.currentTimeMillis()): String {
+        if (!isSleepTimerActive) return "Off"
+        if (isSleepTimerEndOfTrack) return "Active: End of current track"
+        val remainingMs = (sleepTimerEndTimeMs - nowMs).coerceAtLeast(0L)
+        val remainingMin = if (remainingMs > 0L) {
+            ((remainingMs + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
+        } else {
+            sleepTimerMinutes.coerceAtLeast(1)
+        }
+        return "Active: $remainingMin min remaining"
+    }
+
     val progress: Float
         get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 
@@ -41,6 +69,9 @@ data class PlayerUiState(
         get() = formatSpeedButtonLabel(playbackSpeed)
 
     companion object {
+        const val SLEEP_TIMER_OFF: Int = 0
+        const val SLEEP_TIMER_END_OF_TRACK: Int = -1
+
         val PLAYBACK_SPEED_OPTIONS: List<Float> = listOf(
             0.5f,
             0.75f,
