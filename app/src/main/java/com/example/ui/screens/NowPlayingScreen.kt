@@ -88,6 +88,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,6 +107,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -117,6 +120,7 @@ import coil.request.ImageRequest
 import com.example.data.model.RepeatMode
 import com.example.data.model.Song
 import com.example.player.PlayerUiState
+import com.example.player.service.PlaybackService
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.NeonPink
 import com.example.ui.theme.NeonPinkLight
@@ -124,6 +128,10 @@ import com.example.ui.theme.NeonPurple
 import java.io.File
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -153,11 +161,34 @@ private val PlayPauseGradientBrush = Brush.linearGradient(
 
 private val VisualizerBarBrush = Brush.verticalGradient(
     colors = listOf(
+        Color(0xFFFFB8F4),
         NeonPinkLight,
         NeonPink,
-        NeonPurple.copy(alpha = 0.6f)
+        Color(0xFFD91B82),
+        NeonPurple.copy(alpha = 0.82f)
     )
 )
+
+private val VisualizerBarGlowBrush = Brush.verticalGradient(
+    colors = listOf(
+        NeonPinkLight.copy(alpha = 0.34f),
+        NeonPink.copy(alpha = 0.24f),
+        NeonPurple.copy(alpha = 0.16f)
+    )
+)
+
+private val VisualizerAmbientAuraBrush = Brush.horizontalGradient(
+    colors = listOf(
+        Color.Transparent,
+        NeonPurple.copy(alpha = 0.14f),
+        NeonPink.copy(alpha = 0.22f),
+        NeonPurple.copy(alpha = 0.14f),
+        Color.Transparent
+    )
+)
+
+private const val VISUALIZER_BAR_COUNT = 28
+private const val VISUALIZER_RESTING_FRACTION = 0.14f
 
 private val ArtworkCornerShape = RoundedCornerShape(30.dp)
 private val BottomSheetTopCornerShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
@@ -385,6 +416,7 @@ fun NowPlayingScreen(
             // 8. Subtle Audio Visualizer near the bottom (pauses when music is paused)
             NowPlayingWaveformVisualizer(
                 isPlaying = playerState.isPlaying,
+                songId = song.id,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(22.dp)
@@ -2214,64 +2246,316 @@ private fun NowPlayingSecondaryControlsRow(
 }
 
 /**
- * Small subtle audio visualizer / equalizer near the bottom of Now Playing.
- * - Uses pink/magenta bars.
- * - Reads phaseState inside the Canvas draw lambda ONLY so 24fps updates invalidate
- *   only the draw layer with ZERO Compose recompositions.
- * - Completely disables animation when music is paused (zero background ticks when paused).
+ * Premium, audio-reactive neon pink/purple waveform visualizer near the bottom of Now Playing.
+ * - Responds in real time to ExoPlayer PCM amplitude, deep bass, and beat intensity via
+ *   [PlaybackService.visualizerBridge], blended seamlessly with non-repetitive acoustic harmonic
+ *   envelopes when hardware offload or test harnesses are active.
+ * - Adapts automatically to the display's supported refresh rate (60Hz -> 16ms, 90Hz -> 11ms,
+ *   120Hz -> 8ms) with frame-rate-independent exponential spring physics (`dt`-scaled attack & release).
+ * - Smoothly transitions when [songId] changes and smoothly decays to a calm resting baseline
+ *   when [isPlaying] is false, completely stopping the frame loop once settled (zero idle CPU/GPU).
+ * - Reads [frameTickState] ONLY inside the [Canvas] draw scope so zero Compose recompositions
+ *   occur during animation.
  */
 @Composable
 private fun NowPlayingWaveformVisualizer(
     isPlaying: Boolean,
+    songId: Long = -1L,
     modifier: Modifier = Modifier
 ) {
-    val phaseState = remember { mutableFloatStateOf(0f) }
+    val view = LocalView.current
+    val smoothedBars = remember { FloatArray(VISUALIZER_BAR_COUNT) { VISUALIZER_RESTING_FRACTION } }
+    val rawTargets = remember { FloatArray(VISUALIZER_BAR_COUNT) { VISUALIZER_RESTING_FRACTION } }
+    val liveBands = remember { FloatArray(VISUALIZER_BAR_COUNT) }
+    val peakCaps = remember { FloatArray(VISUALIZER_BAR_COUNT) { VISUALIZER_RESTING_FRACTION } }
 
-    // Only run the visualizer loop while music is actively playing
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (isActive) {
-                phaseState.floatValue = (phaseState.floatValue + 0.22f) % (2f * Math.PI.toFloat())
-                delay(42L) // ~24fps capped refresh rate for low CPU/battery consumption
+    val frameTickState = remember { mutableLongStateOf(0L) }
+    val glowIntensityState = remember { mutableFloatStateOf(0f) }
+    val beatPulseState = remember { mutableFloatStateOf(0f) }
+    val activeSongIdState = remember { mutableLongStateOf(songId) }
+    val songTransitionState = remember { mutableFloatStateOf(1f) }
+
+    LaunchedEffect(isPlaying, songId) {
+        val bridge = PlaybackService.visualizerBridge
+        if (activeSongIdState.longValue != songId) {
+            activeSongIdState.longValue = songId
+            // Trigger a smooth cross-damping envelope on track change instead of an abrupt jump
+            songTransitionState.floatValue = 0f
+        }
+
+        // Adapt frame pacing interval to device display refresh rate (60Hz / 90Hz / 120Hz+)
+        val displayHz = try {
+            view.display?.refreshRate?.coerceIn(60f, 120f) ?: 60f
+        } catch (_: Exception) {
+            60f
+        }
+        val frameDelayMs = (1000f / displayHz).toLong().coerceIn(8L, 16L)
+
+        val songSeed = ((songId xor (songId ushr 16)) and 0x7FFF_FFFFL).toFloat() * 0.017f
+        var lastFrameNanos = 0L
+        var phaseLow = (songSeed % 6.283185f)
+        var phaseMid = ((songSeed * 1.618034f) % 6.283185f)
+        var phaseHigh = ((songSeed * 2.414213f) % 6.283185f)
+        var beatPhase = ((songSeed * 0.754877f) % 6.283185f)
+        var synthBeatEnv = 0f
+
+        while (isActive) {
+            val frameNanos = System.nanoTime()
+            val dt = if (lastFrameNanos == 0L) {
+                1f / displayHz
+            } else {
+                ((frameNanos - lastFrameNanos) * 1e-9f).coerceIn(0.002f, 0.045f)
             }
+            lastFrameNanos = frameNanos
+
+            // Advance smooth song-transition recovery (~260ms ramp)
+            if (songTransitionState.floatValue < 1f) {
+                songTransitionState.floatValue =
+                    (songTransitionState.floatValue + dt * 3.85f).coerceAtMost(1f)
+            }
+            val transitionScale = {
+                val t = songTransitionState.floatValue
+                // Dip gently at start of transition, then bloom smoothly into the new song
+                val curve = sin(t * (Math.PI.toFloat() * 0.5f))
+                0.35f + 0.65f * curve
+            }()
+
+            var shouldStopAfterFrame = false
+
+            if (isPlaying) {
+                val liveWeight = bridge.sampleLiveState(frameNanos, liveBands)
+                val liveBass = bridge.bassLevel
+                val liveRms = bridge.rmsAmplitude
+                val liveBeat = bridge.beatIntensity
+                val liveMid = bridge.midLevel
+                val liveTreble = bridge.trebleLevel
+
+                // Advance non-repetitive irrational-ratio acoustic oscillators
+                val speedBoost = 1f + (liveBass * 0.45f + liveBeat * 0.55f) * liveWeight
+                phaseLow = (phaseLow + dt * 3.4f * speedBoost) % 62.831852f
+                phaseMid = (phaseMid + dt * 5.501315f * speedBoost) % 62.831852f
+                phaseHigh = (phaseHigh + dt * 8.208326f * speedBoost) % 62.831852f
+                beatPhase = (beatPhase + dt * 2.15f) % 62.831852f
+
+                // Organic bass/beat envelope when PCM hardware offload is active or warming up
+                val rawKick = max(
+                    0f,
+                    sin(beatPhase) * 0.62f +
+                        sin(beatPhase * 1.618034f + 0.8f) * 0.38f - 0.32f
+                ) / 0.68f
+                val kickPulse = rawKick * rawKick
+                synthBeatEnv = if (kickPulse > synthBeatEnv) {
+                    synthBeatEnv + (kickPulse - synthBeatEnv) * (1f - exp(-24f * dt))
+                } else {
+                    synthBeatEnv * exp(-7.5f * dt)
+                }
+
+                val effectiveBass = if (liveWeight > 0.05f) {
+                    liveBass * liveWeight + (0.36f + kickPulse * 0.48f) * (1f - liveWeight)
+                } else {
+                    0.36f + kickPulse * 0.48f
+                }
+                val effectiveBeat = if (liveWeight > 0.05f) {
+                    liveBeat * liveWeight + synthBeatEnv * (1f - liveWeight)
+                } else {
+                    synthBeatEnv
+                }
+                val effectiveRms = if (liveWeight > 0.05f) {
+                    liveRms * liveWeight + (0.42f + synthBeatEnv * 0.36f) * (1f - liveWeight)
+                } else {
+                    0.42f + synthBeatEnv * 0.36f
+                }
+
+                val centerIndex = (VISUALIZER_BAR_COUNT - 1) * 0.5f
+                for (i in 0 until VISUALIZER_BAR_COUNT) {
+                    val centerDist = abs(i - centerIndex) / centerIndex
+                    val centerEnvelope = 1f - centerDist * 0.72f
+
+                    // Multi-band organic harmonic synthesis (irrational spatial & temporal ratios)
+                    val subBassWave = sin(phaseLow + i * 0.34f) * 0.5f + 0.5f
+                    val vocalMidWave = sin(phaseMid - i * 0.5142f + cos(phaseLow * 0.7f)) * 0.5f + 0.5f
+                    val trebleAirWave = sin(phaseHigh + i * 0.8319f) * 0.5f + 0.5f
+
+                    val bassWeight = (1f - centerDist).let { it * it }
+                    val midWeight = 1f - abs(centerDist - 0.44f)
+                    val highWeight = centerDist
+
+                    val synthBand = (
+                        subBassWave * (0.42f + 0.30f * bassWeight) +
+                            vocalMidWave * (0.34f + 0.20f * midWeight) +
+                            trebleAirWave * (0.18f + 0.18f * highWeight) +
+                            effectiveBeat * (0.22f + 0.34f * bassWeight)
+                        ) * centerEnvelope * (0.58f + 0.42f * effectiveRms)
+
+                    val liveBand = if (liveWeight > 0f) {
+                        (
+                            liveBands[i] * 0.74f +
+                                liveBass * bassWeight * 0.16f +
+                                liveMid * midWeight * 0.06f +
+                                liveTreble * highWeight * 0.04f
+                            )
+                    } else {
+                        0f
+                    }
+
+                    val blended = if (liveWeight > 0f) {
+                        liveBand * liveWeight + synthBand * (1f - liveWeight * 0.80f)
+                    } else {
+                        synthBand
+                    }
+
+                    rawTargets[i] = (
+                        VISUALIZER_RESTING_FRACTION +
+                            blended * (1f - VISUALIZER_RESTING_FRACTION) * transitionScale
+                        ).coerceIn(VISUALIZER_RESTING_FRACTION, 1f)
+                }
+
+                // Apply subtle spatial neighbor coupling & frame-rate-independent spring damping
+                val attackCoeff = 1f - exp(-28f * dt)
+                val releaseCoeff = 1f - exp(-11.5f * dt)
+                val peakDecay = 0.38f * dt
+
+                for (i in 0 until VISUALIZER_BAR_COUNT) {
+                    val prevNeighbor = if (i > 0) rawTargets[i - 1] else rawTargets[i]
+                    val nextNeighbor = if (i < VISUALIZER_BAR_COUNT - 1) rawTargets[i + 1] else rawTargets[i]
+                    val coupledTarget = (
+                        rawTargets[i] * 0.76f +
+                            (prevNeighbor + nextNeighbor) * 0.12f
+                        ).coerceIn(VISUALIZER_RESTING_FRACTION, 1f)
+
+                    val current = smoothedBars[i]
+                    val coeff = if (coupledTarget > current) attackCoeff else releaseCoeff
+                    val updated = (current + (coupledTarget - current) * coeff)
+                        .coerceIn(VISUALIZER_RESTING_FRACTION, 1f)
+                    smoothedBars[i] = updated
+
+                    if (updated >= peakCaps[i]) {
+                        peakCaps[i] = updated
+                    } else {
+                        peakCaps[i] = max(updated, peakCaps[i] - peakDecay)
+                    }
+                }
+
+                val targetGlow = (0.28f + effectiveBass * 0.42f + effectiveBeat * 0.30f)
+                    .coerceIn(0.18f, 1f) * transitionScale
+                val glowCoeff = 1f - exp(-16f * dt)
+                glowIntensityState.floatValue += (targetGlow - glowIntensityState.floatValue) * glowCoeff
+
+                val beatCoeff = if (effectiveBeat > beatPulseState.floatValue) {
+                    1f - exp(-30f * dt)
+                } else {
+                    1f - exp(-10f * dt)
+                }
+                beatPulseState.floatValue += (effectiveBeat - beatPulseState.floatValue) * beatCoeff
+            } else {
+                // Smoothly settle bars and glow to resting baseline when paused, then stop loop
+                val settleCoeff = 1f - exp(-10.5f * dt)
+                var maxDelta = 0f
+                for (i in 0 until VISUALIZER_BAR_COUNT) {
+                    val current = smoothedBars[i]
+                    val diff = abs(current - VISUALIZER_RESTING_FRACTION)
+                    if (diff > maxDelta) maxDelta = diff
+                    val updated = current + (VISUALIZER_RESTING_FRACTION - current) * settleCoeff
+                    smoothedBars[i] = updated
+                    peakCaps[i] = updated
+                }
+                glowIntensityState.floatValue *= exp(-9f * dt)
+                beatPulseState.floatValue *= exp(-12f * dt)
+
+                if (maxDelta < 0.003f && glowIntensityState.floatValue < 0.015f) {
+                    for (i in 0 until VISUALIZER_BAR_COUNT) {
+                        smoothedBars[i] = VISUALIZER_RESTING_FRACTION
+                        peakCaps[i] = VISUALIZER_RESTING_FRACTION
+                    }
+                    glowIntensityState.floatValue = 0f
+                    beatPulseState.floatValue = 0f
+                    shouldStopAfterFrame = true
+                }
+            }
+
+            frameTickState.longValue = frameTickState.longValue + 1L
+
+            if (shouldStopAfterFrame) {
+                break
+            }
+            delay(frameDelayMs)
         }
     }
-
-    val amplitudeFactorState = animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0.18f,
-        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-        label = "waveform_amplitude"
-    )
 
     Canvas(
         modifier = modifier.graphicsLayer()
     ) {
-        val currentPhase = phaseState.floatValue
-        val amplitudeFactor = amplitudeFactorState.value
-        val barCount = 28
+        // Read frameTickState inside Canvas draw scope ONLY (zero Compose recompositions)
+        @Suppress("UNUSED_VARIABLE")
+        val tick = frameTickState.longValue
+        val glowIntensity = glowIntensityState.floatValue
+        val beatPulse = beatPulseState.floatValue
+
         val totalWidth = size.width
         val maxHeight = size.height
-        val slotWidth = totalWidth / barCount
+        if (totalWidth <= 0f || maxHeight <= 0f) return@Canvas
+
+        val slotWidth = totalWidth / VISUALIZER_BAR_COUNT
         val barWidth = (slotWidth * 0.48f).coerceAtLeast(2.5.dp.toPx())
-        val cornerRad = CornerRadius(barWidth / 2f, barWidth / 2f)
+        val glowWidth = barWidth * (1.75f + beatPulse * 0.35f)
+        val cornerRad = CornerRadius(barWidth * 0.5f, barWidth * 0.5f)
+        val glowCornerRad = CornerRadius(glowWidth * 0.5f, glowWidth * 0.5f)
 
-        for (i in 0 until barCount) {
-            val normalizedCenterDist = 1f - abs((i - barCount / 2f) / (barCount / 2f))
-            val wave1 = sin(currentPhase + i * 0.48f) * 0.5f + 0.5f
-            val wave2 = sin(currentPhase * 1.4f - i * 0.32f) * 0.5f + 0.5f
-            val combinedWave = (wave1 * 0.65f + wave2 * 0.35f) * normalizedCenterDist
-            val fraction = (0.16f + combinedWave * 0.84f * amplitudeFactor).coerceIn(0.14f, 1f)
+        // 1. Subtle ambient neon pink/purple backdrop aura that breathes with bass & beat
+        if (glowIntensity > 0.02f) {
+            val auraHeight = maxHeight * (0.42f + glowIntensity * 0.46f).coerceAtMost(0.95f)
+            drawRoundRect(
+                brush = VisualizerAmbientAuraBrush,
+                topLeft = Offset(0f, (maxHeight - auraHeight) * 0.5f),
+                size = Size(totalWidth, auraHeight),
+                cornerRadius = CornerRadius(auraHeight * 0.5f, auraHeight * 0.5f),
+                alpha = (glowIntensity * 0.65f).coerceIn(0f, 0.65f)
+            )
+        }
 
-            val barHeight = maxHeight * fraction
-            val x = i * slotWidth + (slotWidth - barWidth) / 2f
-            val y = (maxHeight - barHeight) / 2f
+        // 2. Render each audio-reactive bar with subtle neon bloom & harmonic crest highlight
+        for (i in 0 until VISUALIZER_BAR_COUNT) {
+            val fraction = smoothedBars[i].coerceIn(VISUALIZER_RESTING_FRACTION, 1f)
+            val barHeight = (maxHeight * fraction).coerceAtLeast(barWidth)
+            val x = i * slotWidth + (slotWidth - barWidth) * 0.5f
+            val y = (maxHeight - barHeight) * 0.5f
 
+            // Per-bar subtle neon glow halo on active bars
+            if (glowIntensity > 0.04f && fraction > 0.22f) {
+                val glowBarHeight = (barHeight * (1.10f + beatPulse * 0.12f)).coerceAtMost(maxHeight)
+                val glowX = i * slotWidth + (slotWidth - glowWidth) * 0.5f
+                val glowY = (maxHeight - glowBarHeight) * 0.5f
+                val barGlowAlpha = ((fraction - 0.14f) * glowIntensity * 0.85f).coerceIn(0f, 0.72f)
+                drawRoundRect(
+                    brush = VisualizerBarGlowBrush,
+                    topLeft = Offset(glowX, glowY),
+                    size = Size(glowWidth, glowBarHeight),
+                    cornerRadius = glowCornerRad,
+                    alpha = barGlowAlpha
+                )
+            }
+
+            // Primary neon pink/purple gradient bar
             drawRoundRect(
                 brush = VisualizerBarBrush,
                 topLeft = Offset(x, y),
                 size = Size(barWidth, barHeight),
                 cornerRadius = cornerRad
             )
+
+            // Luminous neon crest highlight on active peaks
+            val peakFraction = peakCaps[i]
+            if (glowIntensity > 0.05f && peakFraction > 0.34f) {
+                val capDiameter = (barWidth * 0.72f).coerceAtLeast(1.5f)
+                val topCapY = (maxHeight - maxHeight * peakFraction) * 0.5f + capDiameter * 0.55f
+                drawCircle(
+                    color = NeonPinkLight.copy(
+                        alpha = ((peakFraction - 0.25f) * 0.65f * glowIntensity).coerceIn(0f, 0.55f)
+                    ),
+                    radius = capDiameter * 0.5f,
+                    center = Offset(x + barWidth * 0.5f, topCapY)
+                )
+            }
         }
     }
 }

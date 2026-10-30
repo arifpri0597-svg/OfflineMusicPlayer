@@ -903,5 +903,71 @@ class ExampleRobolectricTest {
             }
         }
     }
+
+    @Test
+    fun `audioVisualizerBridge and audioProcessor react to real-time amplitude bass and beats while preserving PCM audio`() {
+        val bridge = com.example.player.service.AudioVisualizerBridge(bandCount = 28)
+        val processor = com.example.player.service.PureTuneVisualizerAudioProcessor(bridge)
+
+        val format = androidx.media3.common.audio.AudioProcessor.AudioFormat(
+            44100,
+            2,
+            androidx.media3.common.C.ENCODING_PCM_16BIT
+        )
+        val configuredFormat = processor.configure(format)
+        assertEquals(format, configuredFormat)
+        processor.flush()
+
+        // 1. Feed low-level ambient audio first to establish baseline
+        val frameCount = 256
+        val quietBuffer = java.nio.ByteBuffer
+            .allocateDirect(frameCount * format.bytesPerFrame)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until frameCount) {
+            val sample = (kotlin.math.sin(i * 0.08) * 1200).toInt().toShort()
+            quietBuffer.putShort(sample)
+            quietBuffer.putShort(sample)
+        }
+        quietBuffer.flip()
+        processor.queueInput(quietBuffer)
+
+        val outQuiet = processor.output
+        assertEquals(frameCount * format.bytesPerFrame, outQuiet.remaining())
+        val quietRms = bridge.rmsAmplitude
+        val quietBass = bridge.bassLevel
+        assertTrue("Quiet signal should produce non-zero RMS ($quietRms)", quietRms > 0.01f)
+
+        // 2. Feed a strong sub-bass kick + beat transient buffer and verify bass, RMS, and beat intensity jump
+        val bassKickBuffer = java.nio.ByteBuffer
+            .allocateDirect(frameCount * format.bytesPerFrame)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until frameCount) {
+            // Low-frequency ~85Hz strong wave
+            val sample = (kotlin.math.sin(i * 0.012) * 28000).toInt().toShort()
+            bassKickBuffer.putShort(sample)
+            bassKickBuffer.putShort(sample)
+        }
+        bassKickBuffer.flip()
+        processor.queueInput(bassKickBuffer)
+
+        val outKick = processor.output
+        assertEquals(frameCount * format.bytesPerFrame, outKick.remaining())
+        assertTrue("Strong bass kick should increase RMS (${bridge.rmsAmplitude} > $quietRms)", bridge.rmsAmplitude > quietRms)
+        assertTrue("Strong bass kick should increase bassLevel (${bridge.bassLevel} > $quietBass)", bridge.bassLevel > quietBass)
+        assertTrue("Beat transient detector should register kick (${bridge.beatIntensity})", bridge.beatIntensity > 0.05f)
+
+        val sampledBands = FloatArray(28)
+        val liveWeight = bridge.sampleLiveState(System.nanoTime(), sampledBands)
+        assertEquals(1f, liveWeight, 0.01f)
+        assertTrue("28-band spectral targets should be active", sampledBands.any { it > 0.25f })
+
+        // 3. Verify flush/reset clears live signal cleanly for smooth pause/track transitions
+        processor.flush()
+        assertEquals(0f, bridge.rmsAmplitude, 0.0001f)
+        assertEquals(0f, bridge.bassLevel, 0.0001f)
+        assertEquals(0f, bridge.beatIntensity, 0.0001f)
+        assertEquals(0f, bridge.sampleLiveState(System.nanoTime(), sampledBands), 0.0001f)
+    }
 }
+
 
