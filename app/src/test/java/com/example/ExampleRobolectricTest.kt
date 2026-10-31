@@ -20,6 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -968,6 +969,221 @@ class ExampleRobolectricTest {
         assertEquals(0f, bridge.beatIntensity, 0.0001f)
         assertEquals(0f, bridge.sampleLiveState(System.nanoTime(), sampledBands), 0.0001f)
     }
+
+    @Test
+    @Config(sdk = [33])
+    fun `playlist screen redesign supports creation deletion add tracks shuffle reordering favorite more menu playback mini player and smooth scrolling`() {
+        val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
+        val shadowApp = org.robolectric.Shadows.shadowOf(app)
+        shadowApp.grantPermissions(
+            android.Manifest.permission.READ_MEDIA_AUDIO,
+            android.Manifest.permission.POST_NOTIFICATIONS
+        )
+        Thread.sleep(100)
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            app.database.clearAllTables()
+            app.playbackStateRepository.clearPlaybackState()
+        }
+        registerTestMediaStoreProvider(7)
+
+        androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            var scannedSongs: List<com.example.data.model.Song> = emptyList()
+            val deadline = System.currentTimeMillis() + 5_000L
+            while (System.currentTimeMillis() < deadline) {
+                composeTestRule.waitForIdle()
+                scenario.onActivity { activity ->
+                    val vm = androidx.lifecycle.ViewModelProvider(activity)[com.example.viewmodel.MusicViewModel::class.java]
+                    scannedSongs = vm.libraryState.value.songs
+                }
+                if (scannedSongs.size == 7) break
+                Thread.sleep(50)
+            }
+            assertEquals(7, scannedSongs.size)
+
+            val fakeHarness = PlaybackServiceTest.FakePlayerHarness()
+            val playlistId = runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                val dao = app.database.musicDao()
+                val id = dao.insertPlaylist(PlaylistEntity(name = "my music"))
+                dao.appendSongsToPlaylist(id, scannedSongs.take(5).map { it.id })
+                id
+            }
+
+            scenario.onActivity { activity ->
+                val vm = androidx.lifecycle.ViewModelProvider(activity)[com.example.viewmodel.MusicViewModel::class.java]
+                vm.playerController.setPlayerForTesting(fakeHarness.playerProxy)
+                vm.setNowPlayingExpanded(false)
+                vm.setNavigationTab(com.example.viewmodel.NavigationTab.PLAYLISTS)
+            }
+
+            for (attempt in 0 until 20) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    .idleFor(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                composeTestRule.waitForIdle()
+            }
+
+            // 1. Verify Playlists overview screen & select "my music"
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlists_screen")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_item_$playlistId"))
+                .assertExists()
+                .performClick()
+            composeTestRule.waitForIdle()
+
+            for (attempt in 0 until 15) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    .idleFor(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                composeTestRule.waitForIdle()
+            }
+
+            // 2. Verify Playlist Header & 2 Horizontal Action Buttons (Shuffle + Add Tracks)
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_detail_screen")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_back_btn")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_add_tracks_btn")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_delete_btn")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_header_artwork")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_header_title")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_header_track_count")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_shuffle_btn")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_action_add_tracks_btn")).assertExists()
+
+            val song1 = scannedSongs[0]
+            val song2 = scannedSongs[1]
+            val song6 = scannedSongs[5]
+            val song7 = scannedSongs[6]
+
+            // 3. Verify Add Tracks button opens dialog and adds remaining 2 tracks (making 7 tracks total)
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_action_add_tracks_btn")).performClick()
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("add_tracks_item_${song6.id}")).performClick()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("add_tracks_item_${song7.id}")).performClick()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("add_tracks_confirm_btn")).performClick()
+
+            for (attempt in 0 until 15) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    .idleFor(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                composeTestRule.waitForIdle()
+            }
+
+            val countAfterAdd = runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                app.database.musicDao().getPlaylistTrackCount(playlistId)
+            }
+            assertEquals("Playlist should now contain 7 tracks", 7, countAfterAdd)
+
+            // 4. Verify each playlist song row has artwork, favorite heart, 3-dot More menu, and far-right drag handle
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("song_item_${song1.id}")).assertExists()
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("fav_btn_${song1.id}"),
+                useUnmergedTree = true
+            ).assertExists()
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("more_btn_${song1.id}"),
+                useUnmergedTree = true
+            ).assertExists()
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("playlist_drag_handle_${song1.id}"),
+                useUnmergedTree = true
+            ).assertExists()
+
+            // 5. Verify playback from playlist & currently playing highlighted state + MiniPlayer + 5-tab Bottom Nav
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_detail_screen"))
+                .performScrollToNode(androidx.compose.ui.test.hasTestTag("song_item_${song1.id}"))
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("song_item_${song1.id}")).performClick()
+            composeTestRule.waitForIdle()
+            var debugMsg = ""
+            scenario.onActivity { activity ->
+                val vm = androidx.lifecycle.ViewModelProvider(activity)[com.example.viewmodel.MusicViewModel::class.java]
+                val st = vm.playerController.uiState.value
+                debugMsg = "isPlaying=${fakeHarness.isPlaying}, mediaItems=${fakeHarness.mediaItems.size}, uiSong=${st.currentSong?.id}, uiPlaying=${st.isPlaying}, restoredPaused=${vm.playerController.isInRestoredPausedState()}, nowPlayingExpanded=${vm.libraryState.value.isNowPlayingExpanded}, selectedPlaylistSongs=${vm.libraryState.value.selectedPlaylistSongs.size}"
+            }
+            assertTrue("Player should be playing after clicking song1 ($debugMsg)", fakeHarness.isPlaying)
+            assertEquals("Clicking song in playlist should queue all 7 playlist songs", 7, fakeHarness.mediaItems.size)
+
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("playlist_playing_indicator_${song1.id}"),
+                useUnmergedTree = true
+            ).assertExists()
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("playlist_playing_progress_${song1.id}"),
+                useUnmergedTree = true
+            ).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("mini_player_overlay")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("bottom_nav_bar")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_home")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_songs")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_albums")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_folders")).assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("nav_item_settings")).assertExists()
+
+            // 6. Verify Favorite toggle on song1
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("fav_btn_${song1.id}"),
+                useUnmergedTree = true
+            ).performClick()
+            for (attempt in 0 until 10) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    .idleFor(40, java.util.concurrent.TimeUnit.MILLISECONDS)
+                composeTestRule.waitForIdle()
+            }
+            val isFavSong1 = runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                app.database.musicDao().isFavorite(song1.id).first()
+            }
+            assertTrue("Song 1 should be marked favorite", isFavSong1)
+
+            // 7. Verify More menu & Song Reordering (Move Down on song1 moves it from index 0 to index 1)
+            composeTestRule.onNode(
+                androidx.compose.ui.test.hasTestTag("more_btn_${song1.id}"),
+                useUnmergedTree = true
+            ).performClick()
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_menu_move_down_${song1.id}"))
+                .assertExists()
+                .performClick()
+
+            for (attempt in 0 until 10) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    .idleFor(40, java.util.concurrent.TimeUnit.MILLISECONDS)
+                composeTestRule.waitForIdle()
+            }
+            val orderedIdsAfterReorder = runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                app.database.musicDao().getSongIdsForPlaylist(playlistId).first()
+            }
+            assertEquals("Song 2 should now be first and Song 1 second", song2.id, orderedIdsAfterReorder[0])
+            assertEquals("Song 1 should now be at index 1", song1.id, orderedIdsAfterReorder[1])
+
+            // 8. Verify Shuffle button starts shuffled playback of all 7 playlist tracks
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_detail_screen"))
+                .performScrollToNode(androidx.compose.ui.test.hasTestTag("playlist_shuffle_btn"))
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_shuffle_btn"))
+                .performClick()
+            composeTestRule.waitForIdle()
+            assertEquals("Shuffle should queue all 7 playlist songs", 7, fakeHarness.mediaItems.size)
+            assertTrue("Player should be playing after Shuffle", fakeHarness.isPlaying)
+
+            // 9. Verify scrolling performance on playlist_detail_screen
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_detail_screen"))
+                .performScrollToNode(androidx.compose.ui.test.hasTestTag("song_item_${song7.id}"))
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("song_item_${song7.id}"))
+                .assertExists()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_detail_screen"))
+                .performScrollToNode(androidx.compose.ui.test.hasTestTag("playlist_header_title"))
+            composeTestRule.waitForIdle()
+
+            // 10. Verify Playlist deletion
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("playlist_delete_btn")).performClick()
+            composeTestRule.waitForIdle()
+            composeTestRule.onNode(androidx.compose.ui.test.hasTestTag("confirm_delete_playlist_btn")).performClick()
+            for (attempt in 0 until 10) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                    .idleFor(40, java.util.concurrent.TimeUnit.MILLISECONDS)
+                composeTestRule.waitForIdle()
+            }
+            val playlistsRemaining = runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                app.database.musicDao().getAllPlaylists().first()
+            }
+            assertTrue("Playlist should be deleted from Room database", playlistsRemaining.none { it.id == playlistId })
+        }
+    }
 }
+
 
 

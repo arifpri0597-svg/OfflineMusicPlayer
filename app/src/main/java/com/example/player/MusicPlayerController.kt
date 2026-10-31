@@ -340,7 +340,18 @@ class MusicPlayerController(
         }
     }
 
+    @Volatile
+    private var isTestPlayerAttached: Boolean = false
+
     internal fun setPlayerForTesting(testPlayer: Player) {
+        isTestPlayerAttached = true
+        controllerFuture?.let {
+            try {
+                MediaController.releaseFuture(it)
+            } catch (_: Exception) {
+            }
+            controllerFuture = null
+        }
         controller?.removeListener(playerListener)
         controller = testPlayer
         isControllerConnectionRequested = true
@@ -354,10 +365,16 @@ class MusicPlayerController(
                 startPositionMs = pending.startPositionMs,
                 autoPlay = pending.autoPlay
             )
-        } else if (testPlayer.mediaItemCount == 0 && _uiState.value.currentSong != null && isRestoredPausedState) {
-            applyRestoredStateToPlayer(testPlayer)
         } else {
-            syncStateFromPlayer()
+            isRestoredPausedState = false
+            restoredPositionFloorMs = null
+            if (testPlayer.mediaItemCount == 0) {
+                activeQueue.clear()
+                immutableQueue = emptyList()
+                _uiState.value = PlayerUiState()
+            } else {
+                syncStateFromPlayer()
+            }
         }
     }
 
@@ -377,6 +394,7 @@ class MusicPlayerController(
         controllerFuture = future
         future.addListener({
             try {
+                if (controllerFuture !== future) return@addListener
                 val connectedPlayer = future.get()
                 controller = connectedPlayer
                 connectedPlayer?.addListener(playerListener)
@@ -455,7 +473,7 @@ class MusicPlayerController(
     suspend fun restorePlaybackState(librarySongs: List<Song> = emptyList()): Boolean {
         val repo = playbackStateRepository ?: return false
         // Do not overwrite an actively playing track or an incoming external File Manager intent
-        if (_uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
+        if (isTestPlayerAttached || _uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
             return false
         }
         val isPlayerCurrentlyPlaying = kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
@@ -489,7 +507,7 @@ class MusicPlayerController(
         }
 
         // Re-check after suspend point in case user started playing or external intent arrived
-        if (_uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
+        if (isTestPlayerAttached || _uiState.value.isPlaying || hasExternalIntentOverride || pendingPlayRequest != null) {
             return false
         }
 

@@ -372,6 +372,11 @@ fun PulseMusicAppRoot(
     val onRemoveSongFromPlaylist = remember(viewModel) {
         { playlistId: Long, songId: Long -> viewModel.removeSongFromPlaylist(playlistId, songId) }
     }
+    val onReorderPlaylistSongs = remember(viewModel) {
+        { playlistId: Long, fromIndex: Int, toIndex: Int ->
+            viewModel.reorderPlaylistSongs(playlistId, fromIndex, toIndex)
+        }
+    }
     val onClearFavorites = remember(viewModel) { { viewModel.clearFavorites() } }
     val onThemeChange = remember(viewModel) { { mode: String -> viewModel.setThemeMode(mode) } }
     val onResumeLastChange = remember(viewModel) { { enabled: Boolean -> viewModel.setResumeLastPlayback(enabled) } }
@@ -528,12 +533,14 @@ fun PulseMusicAppRoot(
                                 onDeletePlaylist = onDeletePlaylist,
                                 onAddSongsToPlaylist = onAddSongsToPlaylist,
                                 onRemoveSongFromPlaylist = onRemoveSongFromPlaylist,
+                                onReorderPlaylistSongs = onReorderPlaylistSongs,
                                 onSongClick = onSongClick,
                                 onPlayAll = onPlayAllList,
                                 onShuffleAll = onShuffleAllList,
                                 onToggleFavorite = onToggleFavorite,
                                 onPlayNext = onPlayNext,
-                                onAddToQueue = onAddToQueue
+                                onAddToQueue = onAddToQueue,
+                                onAddToPlaylist = onAddToPlaylist
                             )
                         }
 

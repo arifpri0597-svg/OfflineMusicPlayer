@@ -595,6 +595,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun reorderPlaylistSongs(playlistId: Long, fromIndex: Int, toIndex: Int) {
+        val currentList = _libraryState.value.selectedPlaylistSongs
+        if (fromIndex == toIndex ||
+            fromIndex !in currentList.indices ||
+            toIndex !in currentList.indices
+        ) {
+            return
+        }
+        val reordered = currentList.toMutableList().apply {
+            val moved = removeAt(fromIndex)
+            add(toIndex, moved)
+        }
+        _libraryState.update { state ->
+            if (state.selectedPlaylist?.id == playlistId) {
+                state.copy(selectedPlaylistSongs = reordered)
+            } else {
+                state
+            }
+        }
+        val orderedIds = reordered.map { it.id }
+        viewModelScope.launch(Dispatchers.IO) {
+            musicDao.updatePlaylistSongOrder(playlistId, orderedIds)
+        }
+    }
+
     fun setNowPlayingExpanded(expanded: Boolean) {
         _libraryState.update { it.copy(isNowPlayingExpanded = expanded) }
     }

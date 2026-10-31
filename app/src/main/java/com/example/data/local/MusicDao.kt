@@ -169,6 +169,15 @@ interface MusicDao {
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: Long)
 
+    @Transaction
+    suspend fun updatePlaylistSongOrder(playlistId: Long, orderedSongIds: List<Long>) {
+        if (orderedSongIds.isEmpty()) return
+        val crossRefs = orderedSongIds.mapIndexed { index, songId ->
+            PlaylistSongCrossRef(playlistId = playlistId, songId = songId, orderIndex = index)
+        }
+        addSongsToPlaylist(crossRefs)
+    }
+
     // Playback State Persistence (Single Source of Truth)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPlaybackState(state: PlaybackStateEntity)
