@@ -728,28 +728,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Validates that an incoming external URI uses a permitted scheme (content/file)
+     * Validates that an incoming external URI uses a permitted scheme (content/file),
+     * contains no null-byte injection, does not target internal app authorities,
      * and does not traverse into the application's private internal data directories.
      */
     internal fun isSafeExternalAudioUri(uri: android.net.Uri): Boolean {
+        val rawUriString = uri.toString()
+        if (rawUriString.isBlank() || rawUriString.contains('\u0000')) return false
         val scheme = uri.scheme?.lowercase() ?: return false
         if (scheme != "content" && scheme != "file") return false
 
-        if (scheme == "file") {
-            val rawPath = uri.path ?: return false
-            return try {
-                val canonicalTarget = java.io.File(rawPath).canonicalPath
-                val privateDataDir = app.applicationInfo?.dataDir?.let { java.io.File(it).canonicalPath }
-                val privateFilesDir = app.filesDir?.parentFile?.canonicalPath
-                val isInsidePrivateDir = (privateDataDir != null && canonicalTarget.startsWith(privateDataDir)) ||
-                    (privateFilesDir != null && canonicalTarget.startsWith(privateFilesDir))
-                !isInsidePrivateDir
-            } catch (_: Exception) {
-                false
+        if (scheme == "content") {
+            val authority = uri.authority?.lowercase()?.trim()
+            if (authority.isNullOrBlank()) return false
+            val ownPkg = app.packageName.lowercase()
+            if (authority == ownPkg || authority.startsWith("$ownPkg.")) {
+                return false
             }
+            return true
         }
-        return true
+
+        val rawPath = uri.path ?: return false
+        if (rawPath.contains('\u0000')) return false
+        return try {
+            val canonicalTarget = java.io.File(rawPath).canonicalPath
+            val privateDataDir = app.applicationInfo?.dataDir?.let { java.io.File(it).canonicalPath }
+            val privateFilesDir = app.filesDir?.parentFile?.canonicalPath
+            val isInsidePrivateDir = (privateDataDir != null && canonicalTarget.startsWith(privateDataDir)) ||
+                (privateFilesDir != null && canonicalTarget.startsWith(privateFilesDir))
+            !isInsidePrivateDir
+        } catch (_: Exception) {
+            false
+        }
     }
+
 
     fun playExternalAudioUri(uri: android.net.Uri, mimeType: String? = null) {
         if (!isSafeExternalAudioUri(uri)) {

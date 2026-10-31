@@ -2,6 +2,7 @@
 .gradle
 .kotlin
 /local.properties
+local.properties
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -15,7 +16,27 @@
 /captures
 .externalNativeBuild
 .cxx
-local.properties
-.env
-debug.keystore
 
+# Environment & Secret Configuration
+.env
+.env.*
+!.env.example
+secrets.properties
+secrets.defaults.properties
+keystore.properties
+signing.properties
+google-services.json
+firebase-applet-config.json
+
+# Android Keystores & Private Keys (Never commit release keystores)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+my-upload-key.jks
+release-keystore.jks
+debug.keystore
+*.tmp.jks
+*.tmp.keystore

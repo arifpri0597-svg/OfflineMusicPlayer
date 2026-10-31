@@ -23,7 +23,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [36])
 class ExampleRobolectricTest {
 
     @Test
@@ -423,7 +423,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `reproduce fresh install permission grant to HomeScreen and all tabs rendering`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
@@ -509,7 +509,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `clear app data and grant permission on empty device shows HomeScreen safely`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
@@ -556,7 +556,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `permission denied callback keeps PermissionView visible without crashing`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
@@ -598,7 +598,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `permission already granted on app launch loads library directly to HomeScreen`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
@@ -632,7 +632,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `android 13 PackageParser parses app-debug apk without error`() {
         val apkCandidates = listOf(
             java.io.File("build/outputs/apk/debug/app-debug.apk"),
@@ -671,7 +671,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `internal automatic frame rate policy scales from 60 FPS minimum to 90Hz 120Hz 144Hz and hides any UI setting`() {
         // 1. 60Hz device -> targets 60 FPS / 60Hz
         val modes60Hz = listOf(
@@ -761,7 +761,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `now playing screen matches updated layout with top right menu and sleep timer`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)
@@ -971,7 +971,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Config(sdk = [33])
+    @Config(sdk = [36])
     fun `playlist screen redesign supports creation deletion add tracks shuffle reordering favorite more menu playback mini player and smooth scrolling`() {
         val app = ApplicationProvider.getApplicationContext<PulseMusicApp>()
         val shadowApp = org.robolectric.Shadows.shadowOf(app)

@@ -34,7 +34,7 @@ import org.robolectric.annotation.Config
 import java.lang.reflect.Proxy
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [36])
 class PlaybackServiceTest {
 
     private lateinit var context: Context

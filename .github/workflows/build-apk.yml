@@ -1,4 +1,4 @@
-name: Build Debug APK
+name: Build PureTune APKs
 
 on:
   push:
@@ -7,9 +7,13 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+# Least-privilege token permissions for public repository security
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: Build Android Debug APK
+    name: Build & Verify Android Release and Debug APKs
     runs-on: ubuntu-24.04
 
     steps:
@@ -26,7 +30,6 @@ jobs:
       - name: Verify Gradle Wrapper & Project Structure
         run: |
           echo "=== Verifying Project Structure ==="
-          ls -la
           if [ ! -f "./gradlew" ]; then
             echo "ERROR: Gradle wrapper not found at repository root."
             exit 1
@@ -60,13 +63,35 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --version
 
+      - name: Prepare Optional Release Signing Keystore from GitHub Secrets
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "=== Decoding release keystore from GitHub Secrets ==="
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "${RUNNER_TEMP}/release.tmp.jks"
+            chmod 600 "${RUNNER_TEMP}/release.tmp.jks"
+            echo "KEYSTORE_PATH=${RUNNER_TEMP}/release.tmp.jks" >> "$GITHUB_ENV"
+          else
+            echo "=== No RELEASE_KEYSTORE_BASE64 secret configured; using fallback verification signing ==="
+          fi
+
       - name: Clean Stale Build Outputs
         run: |
           rm -rf app/build build .build-outputs
 
       - name: Build Release and Debug APKs
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew clean testDebugUnitTest assembleRelease verifyReleaseApk assembleDebug verifyDebugApk --no-build-cache --no-configuration-cache --stacktrace
+          ./gradlew clean testDebugUnitTest lintVitalRelease assembleRelease verifyReleaseApk assembleDebug verifyDebugApk --no-build-cache --no-configuration-cache --stacktrace
+
+      - name: Cleanup Temporary Signing Keystore
+        if: always()
+        run: |
+          rm -f "${RUNNER_TEMP}/release.tmp.jks" my-upload-key.jks *.tmp.jks *.tmp.keystore
 
       - name: Verify APK Outputs (ZIP Integrity, Zipalign, Apksigner, Badging)
         run: |
@@ -112,4 +137,3 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 14
-
